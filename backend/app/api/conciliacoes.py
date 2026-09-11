@@ -48,6 +48,7 @@ def create_reconciliation(payload: ReconciliationCreate, session: Session = Depe
     reconciliation = Reconciliation(**payload.model_dump())
     session.add(reconciliation)
     session.flush()
+    session.commit()
     return reconciliation
 
 
@@ -69,6 +70,7 @@ def executar_conciliacao(reconciliation_id: UUID, session: Session = Depends(get
         action=AuditAction.CONCILIACAO, entity_type="Reconciliation", entity_id=reconciliation.id,
         performed_by="sistema", context={"matches_gerados": len(matches)},
     ))
+    session.commit()
     return matches
 
 
@@ -204,6 +206,7 @@ def ajuste_manual(
         before={"status": previous_status}, after={"status": payload.new_status},
         context={"reason": reason.value, "observation": payload.observation},
     ))
+    session.commit()
     return match
 
 
@@ -281,6 +284,7 @@ def fechar_competencia(
         action=AuditAction.FECHAMENTO, entity_type="Reconciliation", entity_id=reconciliation.id,
         performed_by=performed_by,
     ))
+    session.commit()
     return reconciliation
 
 
@@ -297,4 +301,5 @@ def reabrir_competencia(
         action=AuditAction.REABERTURA, entity_type="Reconciliation", entity_id=reconciliation.id,
         performed_by=performed_by,
     ))
+    session.commit()
     return reconciliation

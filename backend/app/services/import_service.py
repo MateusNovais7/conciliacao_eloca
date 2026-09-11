@@ -99,6 +99,14 @@ def import_erp_file(
             raw_data={k: str(v) for k, v in t.raw_row.items()},
         ))
 
+    # Commit explícito: não dependemos do timing do ciclo de vida da
+    # dependência do FastAPI (get_session) para garantir que o ImportFile
+    # e suas transações estejam de fato visíveis a outras requisições antes
+    # de devolvermos a resposta HTTP ao cliente. Sem isso, uma corrida real
+    # aconteceu em produção: o frontend recebia o 201 com o ID do arquivo e
+    # já disparava a próxima chamada (criar a conciliação) antes do commit
+    # ter sido confirmado no Postgres, gerando ForeignKeyViolation.
+    session.commit()
     return import_file
 
 
@@ -154,4 +162,5 @@ def import_bank_file(
             raw_data={k: str(v) for row in t.raw_rows for k, v in row.items()},
         ))
 
+    session.commit()
     return import_file

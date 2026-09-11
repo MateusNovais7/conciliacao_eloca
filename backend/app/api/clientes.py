@@ -21,6 +21,7 @@ def create_client(payload: ClientCreate, session: Session = Depends(get_session)
     client = Client(name=payload.name)
     session.add(client)
     session.flush()
+    session.commit()
     return client
 
 

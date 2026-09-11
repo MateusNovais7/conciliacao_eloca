@@ -22,6 +22,7 @@ def create_bank_account(payload: BankAccountCreate, session: Session = Depends(g
     account = BankAccount(**payload.model_dump())
     session.add(account)
     session.flush()
+    session.commit()
     return account
 
 
@@ -59,4 +60,5 @@ def update_bank_account_config(
     for field, value in payload.model_dump(exclude={"client_id"}).items():
         setattr(account, field, value)
     session.flush()
+    session.commit()
     return account
