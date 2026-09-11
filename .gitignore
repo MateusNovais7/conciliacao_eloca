@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Banco de dados local / uploads
+backend/database/*.db
+backend/storage/
+
+# Ambiente
+.env
+.env.local
+*.env
+
+# OS
+.DS_Store
