@@ -19,11 +19,13 @@ from sqlalchemy.orm import Session
 from app.importers.banks.itau_francesinha import import_itau_francesinha
 from app.importers.erp.crp032a1 import import_crp032a1
 from app.importers.erp.ffp045a2 import import_erp_ffp045a2
+from app.importers.erp.ftp050 import import_ftp050
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction as BankTransactionRow
 from app.models.documento_recebido import DocumentoRecebido as DocumentoRecebidoRow
 from app.models.erp_transaction import ERPTransaction as ERPTransactionRow
 from app.models.import_file import ImportFile, ImportFileKind
+from app.models.nota_fiscal_emitida import NotaFiscalEmitida as NotaFiscalEmitidaRow
 
 
 class DuplicateImportError(Exception):
@@ -174,6 +176,8 @@ def import_bank_file(
             interest_amount=t.interest_amount,
             final_amount=t.final_amount,
             source_sheet=t.source_sheet,
+            due_date=t.due_date,
+            agency=t.agency,
             raw_data={k: str(v) for row in t.raw_rows for k, v in row.items()},
         ))
 
@@ -233,6 +237,64 @@ def import_crp032a1_file(
             valor_multa=d.valor_multa,
             valor_pago=d.valor_pago,
             raw_data={k: str(v) for k, v in d.raw_row.items()},
+        ))
+
+    session.commit()
+    return import_file, False
+
+
+def import_ftp050_file(
+    session: Session,
+    bank_account_id: UUID,
+    file_path: str | Path,
+    competencia_year: int,
+    competencia_month: int,
+    imported_by: str,
+    storage_path: str,
+) -> tuple[ImportFile, bool]:
+    """FTP050 (Relação de NF Emitidas) — usado só para recuperação de
+    documentos apagados (ver app/services/recovery_service.py). Não
+    participa da conciliação mensal normal. Pode ser reenviado várias
+    vezes com períodos diferentes (o ERP limita a exportação a 6 meses
+    por consulta) — cada arquivo com hash próprio soma ao acervo, sem
+    duplicar."""
+    file_path = Path(file_path)
+    file_hash = _file_hash(file_path)
+    existing = _find_existing_import(session, bank_account_id, file_hash)
+    if existing:
+        return existing, True
+
+    notas = import_ftp050(file_path)
+
+    dates = [n.data_emissao for n in notas if n.data_emissao]
+    import_file = ImportFile(
+        bank_account_id=bank_account_id,
+        kind=ImportFileKind.FTP050.value,
+        original_filename=file_path.name,
+        file_hash=file_hash,
+        storage_path=storage_path,
+        competencia_year=competencia_year,
+        competencia_month=competencia_month,
+        period_start=min(dates) if dates else None,
+        period_end=max(dates) if dates else None,
+        row_count=len(notas),
+        imported_by=imported_by,
+    )
+    session.add(import_file)
+    session.flush()
+
+    for n in notas:
+        session.add(NotaFiscalEmitidaRow(
+            import_file_id=import_file.id,
+            bank_account_id=bank_account_id,
+            local_nome=n.local_nome,
+            local_id=n.local_id,
+            data_emissao=n.data_emissao,
+            nota_fiscal=n.nota_fiscal,
+            cliente_id=n.cliente_id,
+            razao_social=n.razao_social,
+            cnpj_cpf=n.cnpj_cpf,
+            total=n.total,
         ))
 
     session.commit()

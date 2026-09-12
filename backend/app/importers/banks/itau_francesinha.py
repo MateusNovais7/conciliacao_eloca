@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.reconciliation.normalization import normalize_title
+from app.reconciliation.parsing import parse_erp_date
 
 DETAIL_HEADER_MARKERS = {
     "Carteira", "Pagador", "Tipo", "Nosso Número", "Seu Número",
@@ -49,6 +50,8 @@ class BankTransaction:
     interest_amount: float     # soma das linhas 'juros'
     final_amount: float | None  # 'Valor Final' da linha principal (líquido no banco)
     source_sheet: str
+    due_date: date | None = None       # coluna 'Vencimento' — usado na reimputação de documentos apagados
+    agency: str | None = None          # coluna 'Agência Receb'
     raw_rows: list[dict] = field(default_factory=list)
 
     @property
@@ -154,6 +157,18 @@ def import_itau_francesinha(path: str | Path, bank: str = "Itaú") -> list[BankT
             op_type = main_row.get("Descrição de Operações")
             op_type = None if pd.isna(op_type) else str(op_type).strip()
 
+            venc_raw = main_row.get("Vencimento")
+            if pd.isna(venc_raw):
+                due_date = None
+            elif hasattr(venc_raw, "date"):
+                due_date = venc_raw.date()
+            else:
+                due_date = parse_erp_date(venc_raw)
+
+            agencia_raw = main_row.get("Agência Receb")
+            agencia_str = None if pd.isna(agencia_raw) else str(agencia_raw).strip()
+            agency = None if agencia_str in (None, "-", "") else agencia_str
+
             transactions.append(BankTransaction(
                 bank=bank,
                 account=account,
@@ -168,6 +183,8 @@ def import_itau_francesinha(path: str | Path, bank: str = "Itaú") -> list[BankT
                 interest_amount=round(interest_total, 2),
                 final_amount=valor_final,
                 source_sheet=sheet_name,
+                due_date=due_date,
+                agency=agency,
                 raw_rows=rows,
             ))
 

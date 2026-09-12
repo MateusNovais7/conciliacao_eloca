@@ -154,3 +154,21 @@ class DailyReconciliationRow(BaseModel):
     status: str  # "OK" | "DIVERGENTE"
     match_ids: list[UUID]
 
+
+class RecoveredTitleOut(BaseModel):
+    match_id: UUID
+    seu_numero: str
+    nosso_numero: str
+    nota_fiscal: str
+    sequencia: str
+    payer_name: str | None
+    principal_amount: float | None
+    due_date: date | None
+    movement_date: date
+    agency: str | None
+    local_id: int | None
+    local_nome: str | None
+    cliente_id: str | None
+    razao_social: str | None
+    resolved: bool
+

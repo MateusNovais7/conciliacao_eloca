@@ -39,6 +39,8 @@ class BankTransaction(Base):
     final_amount: Mapped[float | None] = mapped_column(Numeric(14, 2))
 
     source_sheet: Mapped[str | None] = mapped_column(String(50))
+    due_date: Mapped[date | None] = mapped_column(Date)      # coluna 'Vencimento' — usado na recuperação de documentos
+    agency: Mapped[str | None] = mapped_column(String(20))   # coluna 'Agência Receb'
     raw_data: Mapped[dict | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
 

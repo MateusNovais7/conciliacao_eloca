@@ -14,7 +14,7 @@ from app.database.deps import get_session
 from app.models.bank_account import BankAccount
 from app.models.import_file import ImportFile
 from app.schemas.reconciliation import ImportFileOut
-from app.services.import_service import import_bank_file, import_crp032a1_file, import_erp_file
+from app.services.import_service import import_bank_file, import_crp032a1_file, import_erp_file, import_ftp050_file
 
 router = APIRouter(prefix="/importacoes", tags=["importacoes"])
 
@@ -151,6 +151,45 @@ def upload_crp032a1_file(
             detail=(
                 "Não foi possível processar o arquivo CRP032A1. Verifique se o "
                 "arquivo corresponde ao modelo esperado (Relação de Documentos Recebidos)."
+            ),
+        ) from e
+    if reused:
+        response.status_code = 200
+    return import_file
+
+
+@router.post("/ftp050", response_model=ImportFileOut, status_code=201)
+def upload_ftp050_file(
+    response: Response,
+    bank_account_id: UUID = Form(...),
+    competencia_year: int = Form(...),
+    competencia_month: int = Form(...),
+    imported_by: str = Form(...),
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    _=Depends(require_api_key),
+):
+    """FTP050 (Relação de NF Emitidas) — usado só para recuperar Local e
+    Cliente de documentos apagados por engano (ver /conciliacoes/{id}/recuperacao).
+    Pode ser enviado várias vezes (o ERP limita a 6 meses por exportação);
+    cada arquivo soma ao acervo sem duplicar."""
+    account = session.get(BankAccount, bank_account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Conta não encontrada.")
+
+    saved_path = _save_upload(file)
+    try:
+        import_file, reused = import_ftp050_file(
+            session, bank_account_id, saved_path,
+            competencia_year, competencia_month, imported_by,
+            storage_path=str(saved_path),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Não foi possível processar o arquivo FTP050. Verifique se o "
+                "arquivo corresponde ao modelo esperado (Relação de NF Emitidas)."
             ),
         ) from e
     if reused:

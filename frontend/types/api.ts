@@ -44,6 +44,24 @@ export type Reconciliation = {
   closed_by: string | null;
 };
 
+export type RecoveredTitle = {
+  match_id: string;
+  seu_numero: string;
+  nosso_numero: string;
+  nota_fiscal: string;
+  sequencia: string;
+  payer_name: string | null;
+  principal_amount: number | null;
+  due_date: string | null;
+  movement_date: string;
+  agency: string | null;
+  local_id: number | null;
+  local_nome: string | null;
+  cliente_id: string | null;
+  razao_social: string | null;
+  resolved: boolean;
+};
+
 export type DashboardStatusCount = {
   status: string;
   count: number;

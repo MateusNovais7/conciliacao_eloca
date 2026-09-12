@@ -345,4 +345,93 @@ def test_regra12_desconto_via_api_completa(client):
     assert detalhe["documento_recebido"]["documento"]
 
 
+def test_recuperacao_de_titulos_apagados_via_ftp050(client):
+    r = client.post("/clientes", json={"name": "Cliente Recuperacao"})
+    client_id = r.json()["id"]
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "98967-1",
+    })
+    account_id = r.json()["id"]
+
+    with open(FIXTURES / "erp_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/erp",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("erp.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    erp_file_id = r.json()["id"]
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    bank_file_id = r.json()["id"]
+
+    # FTP050: amostra pequena cobrindo só as NFs 34006 e 6892 (com
+    # duplicata proposital de 6892 para testar o desempate por nome)
+    with open(FIXTURES / "ftp050_amostra.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/ftp050",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("ftp050.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r.status_code == 201, r.text
+
+    r = client.post("/conciliacoes", json={
+        "bank_account_id": account_id, "competencia_year": 2026, "competencia_month": 1,
+        "erp_import_file_id": erp_file_id, "bank_import_file_id": bank_file_id,
+    })
+    reconciliation_id = r.json()["id"]
+    client.post(f"/conciliacoes/{reconciliation_id}/executar")
+
+    r = client.get(f"/conciliacoes/{reconciliation_id}/recuperacao")
+    assert r.status_code == 200
+    titulos = r.json()
+    assert len(titulos) == 50  # sem CRP032A1 nesta importação, os 46 + os 4 que só o CRP032A1 explicaria
+
+    # Caso real 1: 3400622 -> NF 34006, resolvido via FTP050 (candidato único)
+    caso1 = next(t for t in titulos if t["seu_numero"] == "3400622")
+    assert caso1["resolved"] is True
+    assert caso1["local_id"] == 0
+    assert caso1["cliente_id"] == "1433"
+    assert caso1["nota_fiscal"] == "34006"
+    assert caso1["sequencia"] == "22"
+
+    # Caso real 2: 689222 -> NF 6892, aparece 2x no FTP050 (desempate por
+    # nome do pagador 'BAMBUA...' precisa escolher o cliente certo, não o
+    # 'OUTRO CLIENTE QUALQUER' que a amostra propositalmente inclui)
+    caso2 = next(t for t in titulos if t["seu_numero"] == "689222")
+    assert caso2["resolved"] is True
+    assert caso2["local_id"] == 2
+    assert caso2["cliente_id"] == "1642"
+
+    # Os demais títulos não têm NF na amostra pequena -> não resolvidos,
+    # mas presentes na lista (nunca escondidos). NF 34006 tem 2 parcelas
+    # reais (sequências 22 e 23) que resolvem para o mesmo cliente — por
+    # isso são 3 resolvidos, não 2.
+    resolvidos = [t for t in titulos if t["resolved"]]
+    assert len(resolvidos) == 3
+    nao_resolvidos = [t for t in titulos if not t["resolved"]]
+    assert len(nao_resolvidos) == 47
+
+    # Exportação Excel funciona
+    r = client.get(f"/conciliacoes/{reconciliation_id}/recuperacao/excel")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert len(r.content) > 1000
+
+    # Script de console é gerado e contém os dados resolvidos
+    r = client.get(f"/conciliacoes/{reconciliation_id}/recuperacao/script")
+    assert r.status_code == 200
+    assert "window.reimputacao" in r.text
+    assert "34006" in r.text
+    assert "6892" in r.text
+    assert "98967-1" in r.text  # conta corrente da conciliação
+
+
+
 

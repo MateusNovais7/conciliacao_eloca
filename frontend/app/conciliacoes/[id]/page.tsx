@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarDays, Download, Search } from "lucide-react";
+import { CalendarDays, Download, RotateCcw, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Dashboard } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -45,6 +45,13 @@ export default async function DashboardPage({ params }: { params: { id: string }
           >
             <CalendarDays size={15} strokeWidth={2.25} />
             Conciliação diária
+          </Link>
+          <Link
+            href={`/conciliacoes/${params.id}/recuperacao`}
+            className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+          >
+            <RotateCcw size={15} strokeWidth={2.25} />
+            Recuperar documentos
           </Link>
           <a
             href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/exports/${params.id}/excel`}

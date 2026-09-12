@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 from collections import Counter
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.auth import require_api_key
@@ -25,8 +27,10 @@ from app.schemas.reconciliation import (
     ReconciliationMatchDetailOut,
     ReconciliationMatchOut,
     ReconciliationOut,
+    RecoveredTitleOut,
 )
 from app.services.reconciliation_service import run_and_persist_reconciliation
+from app.services.recovery_service import RecoveredTitle, find_recoverable_titles
 
 router = APIRouter(prefix="/conciliacoes", tags=["conciliacoes"])
 
@@ -150,6 +154,11 @@ def executar_conciliacao(reconciliation_id: UUID, session: Session = Depends(get
     ))
     session.commit()
     return matches
+
+
+@router.get("/{reconciliation_id}", response_model=ReconciliationOut)
+def get_reconciliation(reconciliation_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key)):
+    return _get_reconciliation_or_404(session, reconciliation_id)
 
 
 @router.get("/{reconciliation_id}/dashboard", response_model=DashboardOut)
@@ -343,6 +352,243 @@ def conciliacao_diaria(reconciliation_id: UUID, session: Session = Depends(get_s
             match_ids=match_ids_by_day.get(day, []),
         ))
     return rows
+
+
+@router.get("/{reconciliation_id}/recuperacao", response_model=list[RecoveredTitleOut])
+def listar_titulos_recuperaveis(
+    reconciliation_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key),
+):
+    """Cruza os 'TÍTULO DESCONTADO SEM CORRESPONDÊNCIA' com o FTP050
+    (Relação de NF Emitidas) para descobrir Local e Cliente de documentos
+    apagados por engano — ver app/services/recovery_service.py."""
+    _get_reconciliation_or_404(session, reconciliation_id)
+    try:
+        return find_recoverable_titles(session, reconciliation_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _recovered_to_row(r: RecoveredTitle) -> dict:
+    return {
+        "Local": r.local_id if r.resolved else None,
+        "Duplicata": r.nota_fiscal,
+        "Sequência": r.sequencia,
+        "Status": "Cobrança Ativa",
+        "Cliente": r.cliente_id if r.resolved else None,
+        "Data Emissão": None,  # preenchido no export a partir do FTP050 (ver nota)
+        "Vencimento": r.due_date.strftime("%d/%m/%Y") if r.due_date else None,
+        "Valor de Emissão": r.principal_amount,
+        "Banco": 341,
+        "Agência": r.agency,
+        "Tipo Documento": "BOLETO BANCARIO [5]",
+        "Forma Pagamento NF-e 4.0": "Boleto Bancário-[15]",
+        "Número do Título": r.nosso_numero,
+        "_Seu Número (banco)": r.seu_numero,
+        "_Pagador (banco)": r.payer_name,
+        "_Razão Social (FTP050)": r.razao_social,
+        "_Local (nome)": r.local_nome,
+        "_Data liquidação banco": r.movement_date.strftime("%d/%m/%Y"),
+        "_Resolvido": "SIM" if r.resolved else "NÃO — revisar manualmente",
+    }
+
+
+@router.get("/{reconciliation_id}/recuperacao/excel")
+def exportar_recuperacao_excel(
+    reconciliation_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key),
+):
+    import pandas as pd
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.comments import Comment
+    from openpyxl.utils import get_column_letter
+
+    reconciliation = _get_reconciliation_or_404(session, reconciliation_id)
+    titulos = find_recoverable_titles(session, reconciliation_id)
+
+    FORM_COLS = [
+        "Local", "Duplicata", "Sequência", "Status", "Cliente", "Data Emissão",
+        "Vencimento", "Valor de Emissão", "Banco", "Agência", "Tipo Documento",
+        "Forma Pagamento NF-e 4.0", "Número do Título",
+    ]
+    REF_COLS = [
+        "_Seu Número (banco)", "_Pagador (banco)", "_Razão Social (FTP050)",
+        "_Local (nome)", "_Data liquidação banco", "_Resolvido",
+    ]
+    ALL_COLS = FORM_COLS + REF_COLS
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Documentos a reimputar"
+
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+    header_fill = PatternFill("solid", fgColor="0F766E")
+    ref_header_fill = PatternFill("solid", fgColor="78716C")
+    cell_font = Font(name="Arial", size=10)
+    ref_cell_font = Font(name="Arial", size=10, italic=True, color="57534E")
+    thin = Side(style="thin", color="D6D3D1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col_idx, col_name in enumerate(ALL_COLS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name.lstrip("_"))
+        cell.font = header_font
+        cell.fill = header_fill if col_name in FORM_COLS else ref_header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    valor_col_idx = FORM_COLS.index("Valor de Emissão") + 1
+    ws.cell(row=1, column=valor_col_idx).comment = Comment(
+        "Extraído da coluna 'Valor Inicial (R$)' da Francesinha — a 'Valor Final (R$)' "
+        "vem R$ 0,00 para título descontado (carteira de antecipação bancária). "
+        "Confirmar antes de importar em massa.",
+        "Sistema de Conciliação",
+    )
+
+    for row_idx, t in enumerate(titulos, start=2):
+        row = _recovered_to_row(t)
+        for col_idx, col_name in enumerate(ALL_COLS, start=1):
+            value = row.get(col_name)
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = cell_font if col_name in FORM_COLS else ref_cell_font
+            cell.border = border
+            if col_name == "Valor de Emissão" and value is not None:
+                cell.number_format = "#,##0.00"
+            if col_name == "_Resolvido" and value != "SIM":
+                cell.font = Font(name="Arial", size=10, bold=True, color="B91C1C")
+
+    widths = {
+        "Local": 8, "Duplicata": 11, "Sequência": 10, "Status": 15, "Cliente": 9,
+        "Data Emissão": 13, "Vencimento": 12, "Valor de Emissão": 15, "Banco": 8,
+        "Agência": 9, "Tipo Documento": 20, "Forma Pagamento NF-e 4.0": 22,
+        "Número do Título": 15, "_Seu Número (banco)": 16, "_Pagador (banco)": 30,
+        "_Razão Social (FTP050)": 45, "_Local (nome)": 16, "_Data liquidação banco": 16,
+        "_Resolvido": 22,
+    }
+    for col_idx, col_name in enumerate(ALL_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_name, 14)
+    ws.freeze_panes = "A2"
+    if titulos:
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(ALL_COLS))}{len(titulos) + 1}"
+
+    legend = wb.create_sheet("Legenda")
+    legend.cell(row=1, column=1, value="Legenda").font = Font(name="Arial", bold=True, size=12)
+    notas = [
+        "",
+        "Colunas VERDES: campos exatos do formulário do ERP (CRP015A1).",
+        "Colunas CINZAS: dados de referência/auditoria — não fazem parte do formulário.",
+        "'Local'/'Cliente' vazios e '_Resolvido' = NÃO: a NF não foi encontrada com confiança no FTP050 — revisar manualmente antes de importar.",
+        "Valor de Emissão vem de 'Valor Inicial (R$)' da Francesinha (ver comentário na célula do cabeçalho).",
+        "Data Emissão não veio automaticamente neste export — consultar o FTP050 pelo número da NF (coluna Duplicata) e preencher manualmente.",
+    ]
+    for i, nota in enumerate(notas, start=2):
+        legend.cell(row=i, column=1, value=nota).font = Font(name="Arial", size=10)
+    legend.column_dimensions["A"].width = 100
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    filename = f"reimputacao_{reconciliation.competencia_year}_{reconciliation.competencia_month:02d}.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{reconciliation_id}/recuperacao/script", response_class=PlainTextResponse)
+def exportar_recuperacao_script(
+    reconciliation_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key),
+):
+    """Gera um script para colar no console (F12) da tela de cadastro do
+    título (CRP015A1). IMPORTANTE — limite real e assumido: só os campos
+    de texto simples (Duplicata, Sequência, Cliente, Datas, Valor, Título)
+    são preenchidos automaticamente via o atributo 'name' de cada input,
+    que é confiável. Os 4 campos de busca (Local, Status, Tipo Documento,
+    Forma Pagamento) são um widget customizado sem um seletor confiável
+    visível a partir do HTML fornecido — o script digita o valor na caixa
+    de busca para disparar a busca automática do próprio ERP, mas não
+    tenta selecionar a sugestão sozinho. Precisa confirmar manualmente."""
+    _get_reconciliation_or_404(session, reconciliation_id)
+    titulos = find_recoverable_titles(session, reconciliation_id)
+    reconciliation = session.get(Reconciliation, reconciliation_id)
+    account_number = reconciliation.bank_account.account_number if reconciliation.bank_account else ""
+
+    import json
+    payload = [
+        {
+            "nf": t.nota_fiscal, "seq": t.sequencia,
+            "cliente": t.cliente_id, "clienteNome": t.razao_social,
+            "vencimento": t.due_date.strftime("%d/%m/%Y") if t.due_date else "",
+            "valor": t.principal_amount, "agencia": t.agency,
+            "numeroTitulo": t.nosso_numero,
+            "localId": t.local_id, "localNome": t.local_nome,
+            "resolvido": t.resolved,
+            "seuNumero": t.seu_numero,
+        }
+        for t in titulos
+    ]
+
+    script = f"""// Script gerado pelo Sistema de Conciliação — reimputação de documentos apagados.
+// Cole no console (F12) da tela do CRP015A1, com o formulário de NOVO documento aberto.
+//
+// LIMITE CONHECIDO: preenche com segurança os campos de texto simples (Duplicata,
+// Sequência, Cliente, Vencimento, Valor de Emissão, Agência, Número do Título).
+// Local, Status, Tipo Documento e Forma Pagamento são campos de busca customizados —
+// o script digita o valor pra disparar a busca automática do ERP, mas você precisa
+// confirmar/selecionar a sugestão certa manualmente (não seleciona sozinho).
+//
+// Uso: rode window.reimputacao.preencher() para o documento atual, depois de
+// SALVAR no ERP rode window.reimputacao.proximo() e preencher() de novo.
+
+window.reimputacao = (function () {{
+  const documentos = {json.dumps(payload, ensure_ascii=False, indent=2)};
+  let indice = 0;
+
+  function disparar(el, tipo) {{
+    el.dispatchEvent(new Event(tipo, {{ bubbles: true }}));
+  }}
+
+  function setCampo(name, valor) {{
+    const el = document.querySelector(`[name="${{name}}"]`);
+    if (!el) {{ console.warn(`Campo ${{name}} não encontrado na tela atual.`); return; }}
+    el.value = valor ?? "";
+    disparar(el, "input");
+    disparar(el, "keyup");
+    disparar(el, "change");
+  }}
+
+  function preencher() {{
+    const doc = documentos[indice];
+    if (!doc) {{ console.log("Não há mais documentos."); return; }}
+    console.log(`Preenchendo ${{indice + 1}}/${{documentos.length}} — NF ${{doc.nf}}-${{doc.seq}} (${{doc.clienteNome ?? "cliente não resolvido"}})`);
+    if (!doc.resolvido) {{
+      console.warn("Este documento NÃO foi resolvido com confiança (Local/Cliente ausentes) — preencha manualmente.");
+    }}
+    setCampo("NUMFATURA", doc.nf);
+    setCampo("NUMSEQUENCIA", doc.seq);
+    setCampo("CODCLIENTE", doc.cliente);
+    setCampo("DATAVENCTO", doc.vencimento);
+    setCampo("VALOREMISSAO", doc.valor != null ? String(doc.valor).replace(".", ",") : "");
+    setCampo("CONTACORRENTE", "{account_number}");
+    setCampo("NUMTITULO", doc.numeroTitulo);
+
+    console.log(`Local esperado: ${{doc.localNome ?? "?"}} [${{doc.localId ?? "?"}}] — selecione manualmente no campo Local.`);
+    console.log("Confirme também Status = Cobrança Ativa, Tipo Documento = BOLETO BANCARIO [5], Forma Pagamento = Boleto Bancário-[15].");
+  }}
+
+  function proximo() {{
+    indice += 1;
+    if (indice >= documentos.length) {{ console.log("Fim da lista."); return; }}
+    preencher();
+  }}
+
+  function atual() {{ return documentos[indice]; }}
+
+  return {{ documentos, preencher, proximo, atual, total: documentos.length }};
+}})();
+
+console.log(`Carregados ${{window.reimputacao.total}} documentos. Rode window.reimputacao.preencher() para começar.`);
+"""
+    return PlainTextResponse(content=script, media_type="application/javascript")
 
 
 @router.post("/{reconciliation_id}/fechar", response_model=ReconciliationOut)

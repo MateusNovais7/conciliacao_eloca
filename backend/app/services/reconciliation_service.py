@@ -34,6 +34,8 @@ def _row_to_bank_dc(row: BankTransactionRow) -> BankTransactionDC:
         fee_amount=float(row.fee_amount or 0), interest_amount=float(row.interest_amount or 0),
         final_amount=float(row.final_amount) if row.final_amount is not None else None,
         source_sheet=row.source_sheet or "",
+        due_date=row.due_date,
+        agency=row.agency,
     )
     dc._db_id = row.id  # referência de volta para persistir o match
     return dc
