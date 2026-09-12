@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, SmallInteger, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, SmallInteger, String, UniqueConstraint, func
 from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,13 @@ class BankAccount(Base):
     """Configuração por conta — item 21 do escopo original: cada conta pode
     ter tolerâncias e regras próprias."""
     __tablename__ = "bank_accounts"
+    __table_args__ = (
+        # Achado real em produção: o formulário permitiu criar duas contas
+        # idênticas (mesmo cliente, banco e número) sem nenhum aviso. Uma
+        # conta é definida pela combinação cliente+banco+número — duplicar
+        # isso nunca deveria ser possível.
+        UniqueConstraint("client_id", "bank", "account_number", name="uq_bank_account_per_client"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)

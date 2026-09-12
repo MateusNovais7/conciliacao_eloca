@@ -56,6 +56,13 @@ def test_fluxo_completo_ponta_a_ponta(client):
     assert r.status_code == 201, r.text
     account_id = r.json()["id"]
 
+    # criar a mesma conta de novo (mesmo cliente/banco/número) deve ser
+    # bloqueado — bug real encontrado em produção onde isso não acontecia
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "98967-1",
+    })
+    assert r.status_code == 409, r.text
+
     # 3. upload dos dois arquivos reais
     with open(FIXTURES / "erp_janeiro2026.xlsx", "rb") as f:
         r = client.post(
@@ -78,7 +85,10 @@ def test_fluxo_completo_ponta_a_ponta(client):
     assert r.status_code == 201, r.text
     bank_file_id = r.json()["id"]
 
-    # reimportar o mesmo arquivo deve ser bloqueado (idempotência, item 33)
+    # reimportar o mesmo arquivo é idempotente: reaproveita o import
+    # existente (200, não 201) em vez de falhar — item 33 revisado após
+    # uso real: como o hash garante conteúdo idêntico, não há razão para
+    # bloquear o fluxo do usuário.
     with open(FIXTURES / "erp_janeiro2026.xlsx", "rb") as f:
         r = client.post(
             "/importacoes/erp",
@@ -86,7 +96,8 @@ def test_fluxo_completo_ponta_a_ponta(client):
                   "competencia_month": 1, "imported_by": "outro@meathunter.com"},
             files={"file": ("erp-de-novo.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
         )
-    assert r.status_code == 409
+    assert r.status_code == 200
+    assert r.json()["id"] == erp_file_id  # mesmo registro, não duplicou
 
     # 4. criar e executar conciliação
     r = client.post("/conciliacoes", json={

@@ -10,7 +10,7 @@ from app.models.bank_account import BankAccount
 from app.models.client import Client
 from app.models.import_file import ImportFileKind
 from app.models.reconciliation import Reconciliation
-from app.services.import_service import DuplicateImportError, import_bank_file, import_erp_file
+from app.services.import_service import import_bank_file, import_erp_file
 from app.services.reconciliation_service import run_and_persist_reconciliation
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -36,12 +36,12 @@ def bank_account(session):
 
 
 def test_importacao_e_conciliacao_ponta_a_ponta_batem_com_golden_test(session, bank_account):
-    erp_file = import_erp_file(
+    erp_file, _ = import_erp_file(
         session, bank_account.id, FIXTURES / "erp_janeiro2026.xlsx",
         competencia_year=2026, competencia_month=1,
         imported_by="teste@meathunter.com", storage_path="s3://fake/erp.xlsx",
     )
-    bank_file = import_bank_file(
+    bank_file, _ = import_bank_file(
         session, bank_account.id, FIXTURES / "itau_francesinha_janeiro2026.xlsx",
         competencia_year=2026, competencia_month=1,
         imported_by="teste@meathunter.com", storage_path="s3://fake/banco.xlsx",
@@ -78,17 +78,18 @@ def test_importacao_e_conciliacao_ponta_a_ponta_batem_com_golden_test(session, b
     assert len(linked) > 1000
 
 
-def test_reimportar_mesmo_arquivo_e_bloqueado_por_hash(session, bank_account):
-    import_erp_file(
+def test_reimportar_mesmo_arquivo_reaproveita_import_existente(session, bank_account):
+    first, reused_1 = import_erp_file(
         session, bank_account.id, FIXTURES / "erp_janeiro2026.xlsx",
         competencia_year=2026, competencia_month=1,
         imported_by="teste@meathunter.com", storage_path="s3://fake/erp.xlsx",
     )
-    session.flush()
+    assert reused_1 is False
 
-    with pytest.raises(DuplicateImportError):
-        import_erp_file(
-            session, bank_account.id, FIXTURES / "erp_janeiro2026.xlsx",
-            competencia_year=2026, competencia_month=1,
-            imported_by="outro-usuario@meathunter.com", storage_path="s3://fake/erp-de-novo.xlsx",
-        )
+    second, reused_2 = import_erp_file(
+        session, bank_account.id, FIXTURES / "erp_janeiro2026.xlsx",
+        competencia_year=2026, competencia_month=1,
+        imported_by="outro-usuario@meathunter.com", storage_path="s3://fake/erp-de-novo.xlsx",
+    )
+    assert reused_2 is True
+    assert second.id == first.id  # não duplicou, reaproveitou o mesmo registro

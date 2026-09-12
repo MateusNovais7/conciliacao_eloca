@@ -25,8 +25,10 @@ from app.models.import_file import ImportFile, ImportFileKind
 
 
 class DuplicateImportError(Exception):
-    """Levantado quando o mesmo arquivo (mesmo hash) já foi importado para
-    esta conta — item 33: nunca duplicar lançamentos silenciosamente."""
+    """Mantido por compatibilidade — não é mais levantado no fluxo normal
+    de importação (ver import_erp_file/import_bank_file: reimportar o
+    mesmo arquivo agora reaproveita o registro existente em vez de
+    falhar), mas outros pontos podem optar por usá-lo no futuro."""
     def __init__(self, existing_import_file_id: UUID):
         self.existing_import_file_id = existing_import_file_id
         super().__init__(
@@ -38,14 +40,19 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _check_idempotent(session: Session, bank_account_id: UUID, file_hash: str) -> None:
-    existing = (
+def _find_existing_import(session: Session, bank_account_id: UUID, file_hash: str) -> ImportFile | None:
+    """Item 33 (idempotência), revisado após uso real: como o hash já
+    garante que o conteúdo é byte-a-byte idêntico ao que já foi
+    processado, reimportar não precisa falhar — o resultado seria
+    exatamente o mesmo. Em vez de forçar o usuário a caçar o ID do
+    arquivo já importado, devolvemos o registro existente e seguimos o
+    fluxo normalmente (a rota marca a resposta como 200, não 201, para
+    deixar claro que nada novo foi criado)."""
+    return (
         session.query(ImportFile)
         .filter_by(bank_account_id=bank_account_id, file_hash=file_hash)
         .first()
     )
-    if existing:
-        raise DuplicateImportError(existing.id)
 
 
 def import_erp_file(
@@ -56,10 +63,14 @@ def import_erp_file(
     competencia_month: int,
     imported_by: str,
     storage_path: str,
-) -> ImportFile:
+) -> tuple[ImportFile, bool]:
+    """Retorna (import_file, reused) — reused=True quando o arquivo já
+    tinha sido importado antes (mesmo hash) e nada novo foi processado."""
     file_path = Path(file_path)
     file_hash = _file_hash(file_path)
-    _check_idempotent(session, bank_account_id, file_hash)
+    existing = _find_existing_import(session, bank_account_id, file_hash)
+    if existing:
+        return existing, True
 
     transactions = import_erp_ffp045a2(file_path)
 
@@ -107,7 +118,7 @@ def import_erp_file(
     # já disparava a próxima chamada (criar a conciliação) antes do commit
     # ter sido confirmado no Postgres, gerando ForeignKeyViolation.
     session.commit()
-    return import_file
+    return import_file, False
 
 
 def import_bank_file(
@@ -118,10 +129,12 @@ def import_bank_file(
     competencia_month: int,
     imported_by: str,
     storage_path: str,
-) -> ImportFile:
+) -> tuple[ImportFile, bool]:
     file_path = Path(file_path)
     file_hash = _file_hash(file_path)
-    _check_idempotent(session, bank_account_id, file_hash)
+    existing = _find_existing_import(session, bank_account_id, file_hash)
+    if existing:
+        return existing, True
 
     bank_account = session.get(BankAccount, bank_account_id)
     transactions = import_itau_francesinha(file_path, bank=bank_account.bank if bank_account else "Itaú")
@@ -163,4 +176,4 @@ def import_bank_file(
         ))
 
     session.commit()
-    return import_file
+    return import_file, False

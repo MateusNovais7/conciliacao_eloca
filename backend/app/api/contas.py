@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.auth import require_api_key
@@ -19,10 +20,27 @@ def create_bank_account(payload: BankAccountCreate, session: Session = Depends(g
     client = session.get(Client, payload.client_id)
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+
+    existing = session.query(BankAccount).filter_by(
+        client_id=payload.client_id, bank=payload.bank, account_number=payload.account_number,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe uma conta {payload.bank} · {payload.account_number} para este cliente.",
+        )
+
     account = BankAccount(**payload.model_dump())
     session.add(account)
-    session.flush()
-    session.commit()
+    try:
+        session.flush()
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe uma conta {payload.bank} · {payload.account_number} para este cliente.",
+        )
     return account
 
 
