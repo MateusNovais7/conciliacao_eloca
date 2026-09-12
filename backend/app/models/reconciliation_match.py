@@ -25,6 +25,7 @@ class ReconciliationMatchRow(Base):
 
     bank_transaction_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("bank_transactions.id"))
     erp_transaction_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("erp_transactions.id"))
+    documento_recebido_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("documentos_recebidos.id"))
 
     status: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
@@ -41,3 +42,4 @@ class ReconciliationMatchRow(Base):
     reconciliation: Mapped["Reconciliation"] = relationship(back_populates="matches")
     bank_transaction: Mapped["BankTransaction | None"] = relationship()
     erp_transaction: Mapped["ERPTransaction | None"] = relationship()
+    documento_recebido: Mapped["DocumentoRecebido | None"] = relationship()

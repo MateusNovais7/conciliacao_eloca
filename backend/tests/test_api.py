@@ -332,5 +332,17 @@ def test_regra12_desconto_via_api_completa(client):
     r = client.get(f"/conciliacoes/{reconciliation_id}/titulos", params={"status": "VALOR DIVERGENTE"})
     assert len(r.json()) == 0
 
+    # Caso relatado: título 32943-23, conciliado só via CRP032A1 (não está
+    # no FFP045A2) — o detalhe precisa trazer o documento_recebido
+    # preenchido, não deixar 'ERP: sem correspondência' sem explicação.
+    r = client.get(f"/conciliacoes/{reconciliation_id}/titulos", params={"status": "CONCILIADO (título descontado)"})
+    assert r.status_code == 200
+    via_crp = [m for m in r.json() if m["erp_transaction_id"] is None]
+    assert len(via_crp) > 0
+    detalhe = client.get(f"/conciliacoes/{reconciliation_id}/titulos/{via_crp[0]['id']}").json()
+    assert detalhe["erp_transaction"] is None
+    assert detalhe["documento_recebido"] is not None
+    assert detalhe["documento_recebido"]["documento"]
+
 
 

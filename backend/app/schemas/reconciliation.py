@@ -112,6 +112,20 @@ class ERPTransactionOut(BaseModel):
     outgoing_amount: float | None
 
 
+class DocumentoRecebidoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    documento: str
+    cliente: str | None
+    data_pagamento: date | None
+    valor_emissao: float | None
+    valor_desconto: float
+    valor_abatimento: float
+    valor_juros: float
+    valor_multa: float
+    valor_pago: float | None
+
+
 class ReconciliationMatchDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -122,6 +136,7 @@ class ReconciliationMatchDetailOut(BaseModel):
     ignored: bool
     bank_transaction: BankTransactionOut | None
     erp_transaction: ERPTransactionOut | None
+    documento_recebido: DocumentoRecebidoOut | None
 
 
 class ManualAdjustmentCreate(BaseModel):

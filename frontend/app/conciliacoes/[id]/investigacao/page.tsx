@@ -204,7 +204,9 @@ function DetailDrawer({
               </div>
 
               <div>
-                <h3 className="text-sm font-semibold text-stone-500">ERP</h3>
+                <h3 className="text-sm font-semibold text-stone-500">
+                  {detail.erp_transaction ? "ERP (FFP045A2)" : detail.documento_recebido ? "CRP032A1" : "ERP"}
+                </h3>
                 {detail.erp_transaction ? (
                   <dl className="mt-2 space-y-1 text-sm">
                     <Row label="Data" value={formatDate(detail.erp_transaction.transaction_date)} />
@@ -212,6 +214,20 @@ function DetailDrawer({
                     <Row label="Nota Fiscal" value={detail.erp_transaction.nota_fiscal ?? "—"} />
                     <Row label="Valor" value={formatBRL(detail.erp_transaction.incoming_amount)} />
                   </dl>
+                ) : detail.documento_recebido ? (
+                  <>
+                    <p className="mt-1 text-xs text-amber-700">Não está no FFP045A2 — confirmado por esta fonte alternativa.</p>
+                    <dl className="mt-2 space-y-1 text-sm">
+                      <Row label="Documento" value={detail.documento_recebido.documento} />
+                      <Row label="Cliente" value={detail.documento_recebido.cliente ?? "—"} />
+                      <Row label="Data Pagto" value={detail.documento_recebido.data_pagamento ? formatDate(detail.documento_recebido.data_pagamento) : "—"} />
+                      <Row label="Valor Emissão" value={formatBRL(detail.documento_recebido.valor_emissao)} />
+                      {detail.documento_recebido.valor_desconto > 0 && (
+                        <Row label="Valor Desconto" value={formatBRL(detail.documento_recebido.valor_desconto)} />
+                      )}
+                      <Row label="Valor Pago" value={formatBRL(detail.documento_recebido.valor_pago)} />
+                    </dl>
+                  </>
                 ) : <p className="mt-2 text-sm text-stone-400">Sem correspondência no ERP.</p>}
               </div>
             </div>

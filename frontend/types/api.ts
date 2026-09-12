@@ -105,6 +105,19 @@ export type ERPTransactionDetail = {
   outgoing_amount: number | null;
 };
 
+export type DocumentoRecebidoDetail = {
+  id: string;
+  documento: string;
+  cliente: string | null;
+  data_pagamento: string | null;
+  valor_emissao: number | null;
+  valor_desconto: number;
+  valor_abatimento: number;
+  valor_juros: number;
+  valor_multa: number;
+  valor_pago: number | null;
+};
+
 export type ReconciliationMatchDetail = {
   id: string;
   status: string;
@@ -114,5 +127,6 @@ export type ReconciliationMatchDetail = {
   ignored: boolean;
   bank_transaction: BankTransactionDetail | null;
   erp_transaction: ERPTransactionDetail | null;
+  documento_recebido: DocumentoRecebidoDetail | null;
 };
 

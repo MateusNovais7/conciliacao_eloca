@@ -55,7 +55,7 @@ def _row_to_erp_dc(row: ERPTransactionRow) -> ERPTransactionDC:
 
 
 def _row_to_crp_dc(row: DocumentoRecebidoRow) -> DocumentoRecebidoDC:
-    return DocumentoRecebidoDC(
+    dc = DocumentoRecebidoDC(
         documento=row.documento, normalized_title=row.normalized_title, cliente=row.cliente,
         data_pagamento=row.data_pagamento,
         valor_emissao=float(row.valor_emissao) if row.valor_emissao is not None else None,
@@ -64,6 +64,8 @@ def _row_to_crp_dc(row: DocumentoRecebidoRow) -> DocumentoRecebidoDC:
         valor_multa=float(row.valor_multa or 0),
         valor_pago=float(row.valor_pago) if row.valor_pago is not None else None,
     )
+    dc._db_id = row.id
+    return dc
 
 
 def run_and_persist_reconciliation(session: Session, reconciliation_id: UUID) -> list[ReconciliationMatchRow]:
@@ -106,6 +108,7 @@ def run_and_persist_reconciliation(session: Session, reconciliation_id: UUID) ->
             reconciliation_id=reconciliation.id,
             bank_transaction_id=getattr(r.bank_tx, "_db_id", None) if r.bank_tx else None,
             erp_transaction_id=getattr(r.erp_tx, "_db_id", None) if r.erp_tx else None,
+            documento_recebido_id=getattr(r.crp_doc, "_db_id", None) if r.crp_doc else None,
             status=r.status.value,
             confidence=r.confidence,
             diagnostic=r.diagnostic,

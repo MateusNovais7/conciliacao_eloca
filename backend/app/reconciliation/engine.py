@@ -120,6 +120,7 @@ class ReconciliationMatch:
     erp_tx: ERPTransaction | None
     confidence: int
     diagnostic: str
+    crp_doc: DocumentoRecebido | None = None
 
 
 def _is_business_day(d: date) -> bool:
@@ -355,7 +356,7 @@ def run_reconciliation(
                 if abs(expected_erp_value - best.incoming_amount) <= AMOUNT_TOLERANCE:
                     results.append(ReconciliationMatch(
                         status=ReconciliationStatus.CONCILIADO_DESCONTO,
-                        bank_tx=bank_tx, erp_tx=best, confidence=96,
+                        bank_tx=bank_tx, erp_tx=best, confidence=96, crp_doc=crp,
                         diagnostic=(
                             f"Título {bank_tx.seu_numero}: banco recebeu R$ {bank_tx.client_amount:.2f}, "
                             f"ERP baixou R$ {best.incoming_amount:.2f}. Diferença de R$ {best_diff:.2f} "
@@ -473,7 +474,7 @@ def run_reconciliation(
         ):
             results.append(ReconciliationMatch(
                 status=ReconciliationStatus.CONCILIADO_ANTECIPACAO,
-                bank_tx=bank_tx, erp_tx=None, confidence=90,
+                bank_tx=bank_tx, erp_tx=None, confidence=90, crp_doc=crp,
                 diagnostic=(
                     f"Título {bank_tx.seu_numero}: liquidado via carteira de título descontado "
                     f"(antecipação bancária) em {bank_tx.movement_date:%d/%m/%Y}, R$ {bank_tx.client_amount:.2f}. "
