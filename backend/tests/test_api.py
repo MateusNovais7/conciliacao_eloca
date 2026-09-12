@@ -278,3 +278,59 @@ def test_excluir_conciliacao_duplicada_do_historico(client):
     assert r.status_code == 409
 
 
+def test_regra12_desconto_via_api_completa(client):
+    r = client.post("/clientes", json={"name": "Cliente Desconto"})
+    client_id = r.json()["id"]
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "98967-1",
+    })
+    account_id = r.json()["id"]
+
+    with open(FIXTURES / "erp_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/erp",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("erp.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    erp_file_id = r.json()["id"]
+
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    bank_file_id = r.json()["id"]
+
+    with open(FIXTURES / "crp032a1_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/crp032a1",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("crp032a1.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r.status_code == 201, r.text
+    crp_file_id = r.json()["id"]
+    assert r.json()["row_count"] == 3034
+
+    r = client.post("/conciliacoes", json={
+        "bank_account_id": account_id, "competencia_year": 2026, "competencia_month": 1,
+        "erp_import_file_id": erp_file_id, "bank_import_file_id": bank_file_id,
+        "crp032a1_import_file_id": crp_file_id,
+    })
+    reconciliation_id = r.json()["id"]
+
+    r = client.post(f"/conciliacoes/{reconciliation_id}/executar")
+    assert r.status_code == 200, r.text
+
+    r = client.get(f"/conciliacoes/{reconciliation_id}/titulos", params={"status": "CONCILIADO (desconto)"})
+    assert r.status_code == 200
+    assert len(r.json()) == 6
+
+    r = client.get(f"/conciliacoes/{reconciliation_id}/titulos", params={"status": "VALOR DIVERGENTE"})
+    assert len(r.json()) == 0
+
+
+

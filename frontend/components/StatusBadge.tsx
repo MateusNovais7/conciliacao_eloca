@@ -3,6 +3,7 @@ const STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
   "CONCILIADO D+1": { badge: "bg-teal-50 text-teal-800 border-teal-200", dot: "bg-teal-600" },
   "CONCILIADO D+2": { badge: "bg-teal-50 text-teal-800 border-teal-200", dot: "bg-teal-600" },
   "CONCILIADO MANUALMENTE": { badge: "bg-teal-50 text-teal-800 border-teal-200", dot: "bg-teal-600" },
+  "CONCILIADO (desconto)": { badge: "bg-teal-50 text-teal-800 border-teal-200", dot: "bg-teal-600" },
   "CORTE DE COMPETÊNCIA": { badge: "bg-stone-100 text-stone-700 border-stone-300", dot: "bg-stone-500" },
   "CORTE DE COMPETÊNCIA (fim do período importado)": { badge: "bg-stone-100 text-stone-700 border-stone-300", dot: "bg-stone-500" },
   "POSSÍVEL CORRESPONDÊNCIA": { badge: "bg-amber-50 text-amber-800 border-amber-200", dot: "bg-amber-500" },

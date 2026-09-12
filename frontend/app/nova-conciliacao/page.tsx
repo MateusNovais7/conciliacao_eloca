@@ -44,10 +44,13 @@ function NovaConciliacaoForm() {
 
   const [erpFile, setErpFile] = useState<File | null>(null);
   const [bankFile, setBankFile] = useState<File | null>(null);
+  const [crpFile, setCrpFile] = useState<File | null>(null);
   const [erpState, setErpState] = useState<StepState>("idle");
   const [bankState, setBankState] = useState<StepState>("idle");
+  const [crpState, setCrpState] = useState<StepState>("idle");
   const [erpResult, setErpResult] = useState<ImportFile | null>(null);
   const [bankResult, setBankResult] = useState<ImportFile | null>(null);
+  const [crpResult, setCrpResult] = useState<ImportFile | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -118,9 +121,25 @@ function NovaConciliacaoForm() {
       setBankResult(bank);
       setBankState("done");
 
+      let crpId: string | undefined;
+      if (crpFile) {
+        setCrpState("loading");
+        const crpForm = new FormData();
+        crpForm.append("bank_account_id", aid);
+        crpForm.append("competencia_year", String(year));
+        crpForm.append("competencia_month", String(month));
+        crpForm.append("imported_by", importedBy);
+        crpForm.append("file", crpFile);
+        const crp = await api.postForm<ImportFile>("/importacoes/crp032a1", crpForm);
+        setCrpResult(crp);
+        setCrpState("done");
+        crpId = crp.id;
+      }
+
       const reconciliation = await api.post<{ id: string }>("/conciliacoes", {
         bank_account_id: aid, competencia_year: year, competencia_month: month,
         erp_import_file_id: erp.id, bank_import_file_id: bank.id,
+        crp032a1_import_file_id: crpId,
       });
       await api.post(`/conciliacoes/${reconciliation.id}/executar`);
 
@@ -130,6 +149,7 @@ function NovaConciliacaoForm() {
       setErrorMsg(message);
       if (erpState === "loading") setErpState("error");
       if (bankState === "loading") setBankState("error");
+      if (crpState === "loading") setCrpState("error");
     } finally {
       setSubmitting(false);
     }
@@ -245,6 +265,18 @@ function NovaConciliacaoForm() {
             onFile={setBankFile}
             status={<StepStatus state={bankState} idleLabel="arraste a Francesinha / extrato de cobrança" doneLabel={`${bankResult?.row_count ?? "?"} títulos encontrados`} />}
           />
+        </div>
+
+        <div>
+          <FileDrop
+            label="CRP032A1 (opcional)"
+            file={crpFile}
+            onFile={setCrpFile}
+            status={<StepStatus state={crpState} idleLabel="arraste a Relação de Documentos Recebidos, se tiver" doneLabel={`${crpResult?.row_count ?? "?"} documentos encontrados`} />}
+          />
+          <p className="mt-1.5 text-xs text-stone-400">
+            Usado só para explicar desconto comercial em valores divergentes. Pode pular se não tiver esse relatório.
+          </p>
         </div>
 
         {errorMsg && (

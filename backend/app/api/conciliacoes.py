@@ -33,7 +33,7 @@ router = APIRouter(prefix="/conciliacoes", tags=["conciliacoes"])
 RECONCILED_STATUSES = {
     "CONCILIADO", "CONCILIADO D+1", "CONCILIADO D+2",
     "CORTE DE COMPETÊNCIA", "CORTE DE COMPETÊNCIA (fim do período importado)",
-    "CONCILIADO MANUALMENTE",
+    "CONCILIADO MANUALMENTE", "CONCILIADO (desconto)",
 }
 
 

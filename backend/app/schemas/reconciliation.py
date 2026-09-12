@@ -33,6 +33,7 @@ class ReconciliationCreate(BaseModel):
     competencia_month: int
     erp_import_file_id: UUID
     bank_import_file_id: UUID
+    crp032a1_import_file_id: UUID | None = None
 
 
 class ReconciliationOut(BaseModel):

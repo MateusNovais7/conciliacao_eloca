@@ -14,6 +14,7 @@
 | 6 | Antecipação | — | Separada na importação via `ANTECIPAÇÃO RECEBIVEIS` na descrição do ERP |
 | 7/8 | Sem correspondência | 0 | |
 | 9 | Possível correspondência | 80/70 | Busca por valor±R$0,05 + janela de 5 dias úteis + nome semelhante |
+| 12 | Desconto comercial (CRP032A1) | 96 | Fonte opcional — explica valor divergente quando `Valor Emissão − Desconto − Abatimento − Impostos + Juros + Multa` bate exatamente com a baixa do ERP |
 
 ## Não implementado (sem evidência real ainda)
 
@@ -24,10 +25,11 @@
 
 1. **`liquidação de título descontado`** (carteira de antecipação bancária do Itaú) tem `Valor Final = 0` sempre — comparar contra o ERP gera falso positivo de divergência. Separado em status próprio `TITULO_DESCONTADO`, fora do matching por título+valor até haver evidência de como o ERP registra essa baixa.
 2. **PIX / Depósito em Conta no ERP** nunca aparecem na Francesinha de cobrança (que só cobre a carteira de boleto) — escopado via `TipoDocumento`, não contados como `ERP SEM BANCO`.
-3. **Bug conhecido do exportador ERP:** o `.xlsx` do FFP045A2 sai com stylesheet corrompida (`TypeError: expected <class Fill>`). O importador detecta e repara automaticamente via LibreOffice headless antes de processar.
+3. **Bug conhecido do exportador ERP:** o `.xlsx` do FFP045A2 (e também o CRP032A1 — mesmo exportador) sai com stylesheet corrompida (`TypeError: expected <class Fill>`). O importador detecta e repara automaticamente via LibreOffice headless antes de processar.
+4. **Desconto comercial não aparece no FFP045A2** — a baixa já vem líquida, sem explicar por que é menor que o principal do banco. O CRP032A1 (Relação de Documentos Recebidos) tem a resposta no campo `Valor Desconto`. Testado contra os 6 casos de `VALOR DIVERGENTE` de janeiro/2026: os 6 batem exatamente. Fonte opcional — sem o CRP032A1, o comportamento continua sendo `VALOR DIVERGENTE` sem forçar nada.
 
 ## Resultado no Golden Test (jan/2026)
 
-- 3.047 registros bancários, 1.203 recebimentos de duplicata no ERP.
-- 99,81% de conciliação (contando corte de competência normal + fim de período).
+- 3.047 registros bancários, 1.203 recebimentos de duplicata no ERP, 3.034 documentos no CRP032A1 (24 com desconto).
+- 6/6 casos de valor divergente resolvidos pela Regra 12 — zero `VALOR DIVERGENTE` sem explicação.
 - 4 banco-sem-ERP e 6 ERP-sem-banco genuinamente sem explicação (nenhum candidato mesmo com busca fuzzy) — ficam para investigação humana, não foram forçados.

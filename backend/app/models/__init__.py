@@ -3,6 +3,7 @@ from app.models.audit_log import AuditLog
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction
 from app.models.client import Client
+from app.models.documento_recebido import DocumentoRecebido
 from app.models.erp_transaction import ERPTransaction
 from app.models.import_file import ImportFile
 from app.models.manual_adjustment import ManualAdjustment
@@ -15,6 +16,7 @@ __all__ = [
     "BankAccount",
     "BankTransaction",
     "Client",
+    "DocumentoRecebido",
     "ERPTransaction",
     "ImportFile",
     "ManualAdjustment",

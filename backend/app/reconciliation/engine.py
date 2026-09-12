@@ -12,6 +12,8 @@ Implementado nesta versão (evidenciado nos arquivos reais MEATHUNTER / Itaú
   Regra 7  — banco sem ERP
   Regra 8  — ERP sem banco
   Regra 9  — possível correspondência por proximidade (valor + cliente + data)
+  Regra 12 — desconto comercial explica o valor divergente (fonte:
+             CRP032A1, opcional — ver mais abaixo)
 
 DELIBERADAMENTE AINDA NÃO IMPLEMENTADO (aguardando mais evidência/decisão,
 conforme item 31 do prompt — não inventar regra sem evidência):
@@ -25,6 +27,16 @@ conforme item 31 do prompt — não inventar regra sem evidência):
     'liquidação' / 'liquidação de título descontado' / 'baixa por ter sido
     liquidado' — os demais tipos ('baixa para acertos', 'entrada de título
     descontado' etc.) precisam de mais casos reais antes de virarem regra.
+
+REGRA 12 — DESCONTO COMERCIAL (achado real, janeiro/2026): o relatório
+FFP045A2 mostra a baixa já líquida, sem explicar por que ela é menor que o
+principal do banco. O relatório CRP032A1 (Relação de Documentos Recebidos)
+tem essa resposta — campo 'Valor Desconto' (e também Impostos Retidos,
+Abatimento, Juros, Multa). Testado contra os 6 casos de VALOR DIVERGENTE de
+janeiro/2026: **os 6 batem exatamente** com o desconto do CRP032A1. Por ser
+uma fonte OPCIONAL (nem toda competência vai ter um CRP032A1 enviado), o
+motor só aplica essa regra quando `crp_docs` é fornecido — sem ele, o
+comportamento é idêntico ao de antes (VALOR DIVERGENTE sem explicação).
 """
 from __future__ import annotations
 
@@ -34,6 +46,7 @@ from datetime import date, timedelta
 from enum import Enum
 
 from app.importers.banks.itau_francesinha import BankTransaction
+from app.importers.erp.crp032a1 import DocumentoRecebido
 from app.importers.erp.ffp045a2 import ERPTransaction
 
 AMOUNT_TOLERANCE = 0.01
@@ -86,6 +99,7 @@ class ReconciliationStatus(str, Enum):
     TITULO_DESCONTADO = "TÍTULO DESCONTADO (fora do escopo desta versão)"
     CORTE_FIM_PERIODO = "CORTE DE COMPETÊNCIA (fim do período importado)"
     POSSIVEL_CORRESPONDENCIA = "POSSÍVEL CORRESPONDÊNCIA"
+    CONCILIADO_DESCONTO = "CONCILIADO (desconto)"
 
 
 @dataclass
@@ -259,6 +273,7 @@ def _regra9_possiveis_correspondencias(
 def run_reconciliation(
     bank_txs: list[BankTransaction],
     erp_txs: list[ERPTransaction],
+    crp_docs: list[DocumentoRecebido] | None = None,
 ) -> list[ReconciliationMatch]:
     settled_bank = [t for t in bank_txs if t.operation_type in SETTLEMENT_OPERATION_TYPES]
     discounted_bank = [t for t in bank_txs if t.operation_type in DISCOUNTED_TITLE_OPERATION_TYPES]
@@ -267,6 +282,14 @@ def run_reconciliation(
         if t.is_receivable and not t.is_anticipation
         and t.tipo_documento in ERP_TIPO_DOCUMENTO_IN_SCOPE
     ]
+
+    # Regra 12 (opcional): índice do CRP032A1 por título normalizado, usado
+    # só para EXPLICAR um valor divergente já detectado — nunca para
+    # decidir sozinho se algo concilia.
+    crp_by_title: dict[str, DocumentoRecebido] = {}
+    for d in (crp_docs or []):
+        if d.normalized_title:
+            crp_by_title[d.normalized_title] = d
 
     # Índice ERP por título normalizado (pode haver mais de uma parcela do
     # mesmo título base, ex: 7005-21, 7005-22 — normalized_title já inclui
@@ -314,6 +337,23 @@ def run_reconciliation(
 
         if best_diff > AMOUNT_TOLERANCE:
             matched_erp_ids.add(id(best))
+
+            crp = crp_by_title.get(bank_tx.normalized_title)
+            if crp is not None:
+                expected_erp_value = round(bank_tx.client_amount + crp.ajuste_liquido, 2)
+                if abs(expected_erp_value - best.incoming_amount) <= AMOUNT_TOLERANCE:
+                    results.append(ReconciliationMatch(
+                        status=ReconciliationStatus.CONCILIADO_DESCONTO,
+                        bank_tx=bank_tx, erp_tx=best, confidence=96,
+                        diagnostic=(
+                            f"Título {bank_tx.seu_numero}: banco recebeu R$ {bank_tx.client_amount:.2f}, "
+                            f"ERP baixou R$ {best.incoming_amount:.2f}. Diferença de R$ {best_diff:.2f} "
+                            f"explicada por desconto comercial de R$ {crp.valor_desconto:.2f} "
+                            f"(confirmado no CRP032A1, documento {crp.documento})."
+                        ),
+                    ))
+                    continue
+
             results.append(ReconciliationMatch(
                 status=ReconciliationStatus.VALOR_DIVERGENTE,
                 bank_tx=bank_tx, erp_tx=best, confidence=60,
@@ -413,12 +453,15 @@ if __name__ == "__main__":
     from collections import Counter
     from app.importers.banks.itau_francesinha import import_itau_francesinha
     from app.importers.erp.ffp045a2 import import_erp_ffp045a2
+    from app.importers.erp.crp032a1 import import_crp032a1
 
     base = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
     bank_txs = import_itau_francesinha(base / "itau_francesinha_janeiro2026.xlsx")
     erp_txs = import_erp_ffp045a2(base / "erp_janeiro2026.xlsx")
+    crp_path = base / "crp032a1_janeiro2026.xlsx"
+    crp_docs = import_crp032a1(crp_path) if crp_path.exists() else []
 
-    results = run_reconciliation(bank_txs, erp_txs)
+    results = run_reconciliation(bank_txs, erp_txs, crp_docs)
 
     counts = Counter(r.status for r in results)
     print("=== DASHBOARD (janeiro/2026, MEATHUNTER, Itaú 98967-1) ===")
@@ -430,7 +473,8 @@ if __name__ == "__main__":
         + counts.get(ReconciliationStatus.CONCILIADO_D1, 0) \
         + counts.get(ReconciliationStatus.CONCILIADO_D2, 0) \
         + counts.get(ReconciliationStatus.CORTE_COMPETENCIA, 0) \
-        + counts.get(ReconciliationStatus.CORTE_FIM_PERIODO, 0)
+        + counts.get(ReconciliationStatus.CORTE_FIM_PERIODO, 0) \
+        + counts.get(ReconciliationStatus.CONCILIADO_DESCONTO, 0)
     settled_bank_count = len(settled_bank) if (settled_bank := [t for t in bank_txs if t.operation_type in SETTLEMENT_OPERATION_TYPES]) else 0
     pct = 100 * total_conciliado / settled_bank_count if settled_bank_count else 0
     print(f"\n% conciliação (sobre liquidações bancárias): {pct:.2f}%")

@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from app.importers.banks.itau_francesinha import BankTransaction
+from app.importers.erp.crp032a1 import DocumentoRecebido
 from app.importers.erp.ffp045a2 import ERPTransaction
 from app.reconciliation.engine import ReconciliationStatus, run_reconciliation
 from app.reconciliation.normalization import normalize_title
@@ -29,6 +30,15 @@ def make_erp(titulo, valor, dia, tipo="Rec. Dup.", doc=BOLETO_DOC, antecipacao=F
         descricao="ANTECIPAÇÃO RECEBIVEIS" if antecipacao else "",
         incoming_amount=valor, outgoing_amount=None, balance=0.0,
         is_anticipation=antecipacao,
+    )
+
+
+def make_crp(documento, valor_emissao, desconto, valor_pago, abatimento=0.0, juros=0.0, multa=0.0, impostos=0.0):
+    return DocumentoRecebido(
+        documento=documento, normalized_title=normalize_title(documento), cliente="CLIENTE TESTE",
+        data_pagamento=None, valor_emissao=valor_emissao, impostos_retidos=impostos,
+        valor_desconto=desconto, valor_abatimento=abatimento, valor_juros=juros, valor_multa=multa,
+        valor_pago=valor_pago,
     )
 
 
@@ -81,6 +91,39 @@ class TestRegra4ValorDivergente:
         erp = [make_erp("1006", 850.00, date(2026, 1, 6))]
         results = run_reconciliation(bank, erp)
         assert status_for(results, seu_numero="1006") == ReconciliationStatus.VALOR_DIVERGENTE
+
+
+class TestRegra12DescontoComercial:
+    def test_desconto_do_crp032a1_explica_a_diferenca_exatamente(self):
+        # Caso real: título 34238-21, janeiro/2026. Banco recebeu R$
+        # 3.725,84 (principal), ERP baixou R$ 3.437,98. O CRP032A1 mostra
+        # Valor Desconto = R$ 287,86, e 3.725,84 - 287,86 = 3.437,98.
+        bank = [make_bank("3423821", 3725.84, date(2026, 1, 9))]
+        erp = [make_erp("34238-21", 3437.98, date(2026, 1, 12))]
+        crp = [make_crp("34238-21", valor_emissao=3725.84, desconto=287.86, valor_pago=3437.98)]
+        results = run_reconciliation(bank, erp, crp)
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "3423821")
+        assert r.status == ReconciliationStatus.CONCILIADO_DESCONTO
+        assert "287.86" in r.diagnostic or "287,86" in r.diagnostic
+
+    def test_sem_crp032a1_continua_valor_divergente(self):
+        # Mesmo caso, mas sem a fonte CRP032A1 disponível — não deve
+        # inventar a explicação, só sinalizar a divergência normalmente.
+        bank = [make_bank("3423821", 3725.84, date(2026, 1, 9))]
+        erp = [make_erp("34238-21", 3437.98, date(2026, 1, 12))]
+        results = run_reconciliation(bank, erp)  # sem crp_docs
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "3423821")
+        assert r.status == ReconciliationStatus.VALOR_DIVERGENTE
+
+    def test_desconto_que_nao_bate_exatamente_nao_forca_conciliacao(self):
+        # Desconto errado/incompleto no CRP032A1 (não explica a diferença
+        # real) — não deve conciliar às cegas.
+        bank = [make_bank("9001", 1000.00, date(2026, 1, 6))]
+        erp = [make_erp("9001", 850.00, date(2026, 1, 6))]
+        crp = [make_crp("9001", valor_emissao=1000.00, desconto=100.00, valor_pago=900.00)]
+        results = run_reconciliation(bank, erp, crp)
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "9001")
+        assert r.status == ReconciliationStatus.VALOR_DIVERGENTE
 
 
 class TestRegra6Antecipacao:

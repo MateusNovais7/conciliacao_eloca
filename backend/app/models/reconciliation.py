@@ -36,6 +36,7 @@ class Reconciliation(Base):
 
     erp_import_file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("import_files.id"))
     bank_import_file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("import_files.id"))
+    crp032a1_import_file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("import_files.id"))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

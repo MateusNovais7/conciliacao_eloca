@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,7 @@ from app.database.session import Base
 class ImportFileKind(str, enum.Enum):
     ERP = "ERP"
     BANK = "BANK"
+    CRP032A1 = "CRP032A1"
 
 
 class ImportFile(Base):
@@ -25,7 +26,13 @@ class ImportFile(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     bank_account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("bank_accounts.id"), nullable=False)
 
-    kind: Mapped[ImportFileKind] = mapped_column(Enum(ImportFileKind, name="import_file_kind"), nullable=False)
+    # 'kind' guarda o valor do ImportFileKind como texto simples, não um
+    # Enum de banco — mesma decisão tomada para ReconciliationMatchRow.status:
+    # evita precisar de uma migration (ALTER TYPE no Postgres) toda vez que
+    # um novo tipo de arquivo aparecer (foi exatamente o caso do CRP032A1).
+    # A validação de quais valores são aceitos fica na camada de
+    # serviço/schema Pydantic.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)  # sha256
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)

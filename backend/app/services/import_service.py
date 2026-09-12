@@ -17,9 +17,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.importers.banks.itau_francesinha import import_itau_francesinha
+from app.importers.erp.crp032a1 import import_crp032a1
 from app.importers.erp.ffp045a2 import import_erp_ffp045a2
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction as BankTransactionRow
+from app.models.documento_recebido import DocumentoRecebido as DocumentoRecebidoRow
 from app.models.erp_transaction import ERPTransaction as ERPTransactionRow
 from app.models.import_file import ImportFile, ImportFileKind
 
@@ -77,7 +79,7 @@ def import_erp_file(
     dates = [t.transaction_date for t in transactions if t.transaction_date]
     import_file = ImportFile(
         bank_account_id=bank_account_id,
-        kind=ImportFileKind.ERP,
+        kind=ImportFileKind.ERP.value,
         original_filename=file_path.name,
         file_hash=file_hash,
         storage_path=storage_path,
@@ -142,7 +144,7 @@ def import_bank_file(
     dates = [t.movement_date for t in transactions]
     import_file = ImportFile(
         bank_account_id=bank_account_id,
-        kind=ImportFileKind.BANK,
+        kind=ImportFileKind.BANK.value,
         original_filename=file_path.name,
         file_hash=file_hash,
         storage_path=storage_path,
@@ -173,6 +175,64 @@ def import_bank_file(
             final_amount=t.final_amount,
             source_sheet=t.source_sheet,
             raw_data={k: str(v) for row in t.raw_rows for k, v in row.items()},
+        ))
+
+    session.commit()
+    return import_file, False
+
+
+def import_crp032a1_file(
+    session: Session,
+    bank_account_id: UUID,
+    file_path: str | Path,
+    competencia_year: int,
+    competencia_month: int,
+    imported_by: str,
+    storage_path: str,
+) -> tuple[ImportFile, bool]:
+    """CRP032A1 é uma fonte OPCIONAL — nem toda conciliação vai ter um
+    arquivo desse (ver Regra 12, app/reconciliation/engine.py)."""
+    file_path = Path(file_path)
+    file_hash = _file_hash(file_path)
+    existing = _find_existing_import(session, bank_account_id, file_hash)
+    if existing:
+        return existing, True
+
+    documentos = import_crp032a1(file_path)
+
+    dates = [d.data_pagamento for d in documentos if d.data_pagamento]
+    import_file = ImportFile(
+        bank_account_id=bank_account_id,
+        kind=ImportFileKind.CRP032A1.value,
+        original_filename=file_path.name,
+        file_hash=file_hash,
+        storage_path=storage_path,
+        competencia_year=competencia_year,
+        competencia_month=competencia_month,
+        period_start=min(dates) if dates else None,
+        period_end=max(dates) if dates else None,
+        row_count=len(documentos),
+        imported_by=imported_by,
+    )
+    session.add(import_file)
+    session.flush()
+
+    for d in documentos:
+        session.add(DocumentoRecebidoRow(
+            import_file_id=import_file.id,
+            bank_account_id=bank_account_id,
+            documento=d.documento,
+            normalized_title=d.normalized_title,
+            cliente=d.cliente,
+            data_pagamento=d.data_pagamento,
+            valor_emissao=d.valor_emissao,
+            impostos_retidos=d.impostos_retidos,
+            valor_desconto=d.valor_desconto,
+            valor_abatimento=d.valor_abatimento,
+            valor_juros=d.valor_juros,
+            valor_multa=d.valor_multa,
+            valor_pago=d.valor_pago,
+            raw_data={k: str(v) for k, v in d.raw_row.items()},
         ))
 
     session.commit()

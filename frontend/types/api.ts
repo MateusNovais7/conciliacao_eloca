@@ -22,7 +22,7 @@ export type BankAccount = {
 export type ImportFile = {
   id: string;
   bank_account_id: string;
-  kind: "ERP" | "BANK";
+  kind: "ERP" | "BANK" | "CRP032A1";
   original_filename: string;
   competencia_year: number;
   competencia_month: number;

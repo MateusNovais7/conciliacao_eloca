@@ -14,8 +14,10 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.importers.banks.itau_francesinha import BankTransaction as BankTransactionDC
+from app.importers.erp.crp032a1 import DocumentoRecebido as DocumentoRecebidoDC
 from app.importers.erp.ffp045a2 import ERPTransaction as ERPTransactionDC
 from app.models.bank_transaction import BankTransaction as BankTransactionRow
+from app.models.documento_recebido import DocumentoRecebido as DocumentoRecebidoRow
 from app.models.erp_transaction import ERPTransaction as ERPTransactionRow
 from app.models.reconciliation import Reconciliation
 from app.models.reconciliation_match import ReconciliationMatchRow
@@ -52,6 +54,18 @@ def _row_to_erp_dc(row: ERPTransactionRow) -> ERPTransactionDC:
     return dc
 
 
+def _row_to_crp_dc(row: DocumentoRecebidoRow) -> DocumentoRecebidoDC:
+    return DocumentoRecebidoDC(
+        documento=row.documento, normalized_title=row.normalized_title, cliente=row.cliente,
+        data_pagamento=row.data_pagamento,
+        valor_emissao=float(row.valor_emissao) if row.valor_emissao is not None else None,
+        impostos_retidos=float(row.impostos_retidos or 0), valor_desconto=float(row.valor_desconto or 0),
+        valor_abatimento=float(row.valor_abatimento or 0), valor_juros=float(row.valor_juros or 0),
+        valor_multa=float(row.valor_multa or 0),
+        valor_pago=float(row.valor_pago) if row.valor_pago is not None else None,
+    )
+
+
 def run_and_persist_reconciliation(session: Session, reconciliation_id: UUID) -> list[ReconciliationMatchRow]:
     reconciliation = session.get(Reconciliation, reconciliation_id)
     if reconciliation is None:
@@ -71,7 +85,16 @@ def run_and_persist_reconciliation(session: Session, reconciliation_id: UUID) ->
     bank_dcs = [_row_to_bank_dc(r) for r in bank_rows]
     erp_dcs = [_row_to_erp_dc(r) for r in erp_rows]
 
-    results = run_reconciliation(bank_dcs, erp_dcs)
+    crp_dcs = []
+    if reconciliation.crp032a1_import_file_id:
+        crp_rows = (
+            session.query(DocumentoRecebidoRow)
+            .filter_by(import_file_id=reconciliation.crp032a1_import_file_id)
+            .all()
+        )
+        crp_dcs = [_row_to_crp_dc(r) for r in crp_rows]
+
+    results = run_reconciliation(bank_dcs, erp_dcs, crp_dcs)
 
     # Substitui os resultados anteriores desta competência (reconciliar de
     # novo deve refletir o estado atual, não empilhar resultados velhos).
