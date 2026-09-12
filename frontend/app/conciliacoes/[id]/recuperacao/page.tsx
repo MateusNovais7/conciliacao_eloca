@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, FileSpreadsheet, Terminal, UploadCloud } from "lucide-react";
-import { api, ApiError, API_URL } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { Reconciliation, RecoveredTitle } from "@/types/api";
 import { BackButton } from "@/components/BackButton";
+import { DownloadButton } from "@/components/DownloadButton";
 
 function formatBRL(v: number | null) {
   if (v === null) return "—";
@@ -112,21 +113,22 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
             </p>
           </div>
           <div className="flex gap-2">
-            <a
-              href={`${API_URL}/conciliacoes/${params.id}/recuperacao/excel`}
-              className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            <DownloadButton
+              path={`/conciliacoes/${params.id}/recuperacao/excel`}
+              filename={`reimputacao_${reconciliation?.competencia_year}_${String(reconciliation?.competencia_month).padStart(2, "0")}.xlsx`}
+              className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
             >
               <FileSpreadsheet size={15} strokeWidth={2.25} />
               Baixar planilha
-            </a>
-            <a
-              href={`${API_URL}/conciliacoes/${params.id}/recuperacao/script`}
-              download="reimputacao.js"
-              className="flex items-center gap-1.5 rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800"
+            </DownloadButton>
+            <DownloadButton
+              path={`/conciliacoes/${params.id}/recuperacao/script`}
+              filename="reimputacao.js"
+              className="flex items-center gap-1.5 rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
             >
               <Terminal size={15} strokeWidth={2.25} />
               Baixar script de console
-            </a>
+            </DownloadButton>
           </div>
         </div>
       )}

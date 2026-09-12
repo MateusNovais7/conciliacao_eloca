@@ -5,6 +5,7 @@ import type { Dashboard } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { BackButton } from "@/components/BackButton";
 import { ProgressRing } from "@/components/ProgressRing";
+import { DownloadButton } from "@/components/DownloadButton";
 
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -53,13 +54,14 @@ export default async function DashboardPage({ params }: { params: { id: string }
             <RotateCcw size={15} strokeWidth={2.25} />
             Recuperar documentos
           </Link>
-          <a
-            href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/exports/${params.id}/excel`}
-            className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+          <DownloadButton
+            path={`/exports/${params.id}/excel`}
+            filename={`conciliacao_${dashboard.reconciliation_id}.xlsx`}
+            className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
           >
             <Download size={15} strokeWidth={2.25} />
             Exportar Excel
-          </a>
+          </DownloadButton>
           <Link
             href={`/conciliacoes/${params.id}/investigacao`}
             className="flex items-center gap-1.5 rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800"
