@@ -29,7 +29,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = "Ocorreu um erro inesperado.";
     try {
       const body = await res.json();
-      detail = body.detail ?? detail;
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        // Erro de validação do Pydantic: lista de objetos {loc, msg, type}.
+        detail = body.detail
+          .map((err: { loc?: (string | number)[]; msg?: string }) => {
+            const field = err.loc?.[err.loc.length - 1];
+            return field ? `${field}: ${err.msg}` : err.msg;
+          })
+          .filter(Boolean)
+          .join(" · ") || detail;
+      }
     } catch {
       // resposta sem corpo JSON — mantém a mensagem genérica
     }
