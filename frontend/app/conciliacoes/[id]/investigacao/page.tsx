@@ -161,7 +161,7 @@ function DetailDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-10 flex justify-end bg-stone-900/30" onClick={onClose}>
+    <div className="fixed inset-0 z-30 flex justify-end bg-stone-900/30" onClick={onClose}>
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-8 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-6 flex items-start justify-between">
           <h2 className="text-lg font-semibold">Detalhe do título</h2>
