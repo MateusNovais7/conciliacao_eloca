@@ -1315,12 +1315,16 @@ def gerar_script_console_por_titulo(
     );
 
 
-    // Sequência dispara find('CODCLIENTE').
-    // Mantemos apenas esta pequena espera.
+    // Sequência dispara find('CODCLIENTE'), que tenta localizar um
+    // documento existente com essa Duplicata+Sequência para puxar
+    // Cliente/Banco/Agência/Tipo Documento dele. Como o documento original
+    // foi apagado (é por isso que estamos recriando), o ERP mostra
+    // 'Atenção: ... não encontrado' — ESPERADO neste cenário. Vigiamos
+    // por uma janela maior aqui (em vez de só esperar um tempo fixo)
+    // porque esse aviso pode demorar a aparecer, e se aparecer depois do
+    // ponto em que checamos, ele trava a tela sem o script perceber.
 
-    await esperar(
-        TEMPO.cargaSequencia
-    );
+    await observarModal(2000);
 
 
     await fecharModalAgora();
