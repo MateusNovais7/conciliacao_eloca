@@ -9,18 +9,18 @@ para que uma mudança futura no motor não regrida esses números
 silenciosamente.
 
 Inclui o CRP032A1 (Relação de Documentos Recebidos) — fonte OPCIONAL que
-explica desconto comercial em valores divergentes (Regra 12). Sem ele, os
-6 casos ficariam como VALOR DIVERGENTE (ver test_regra12_desconto_...).
+explica desconto comercial (Regra 12) e títulos descontados (Regra 13).
+Sem ele, os 6 casos de desconto ficariam VALOR DIVERGENTE, e os 4 títulos
+descontados que só aparecem no CRP032A1 ficariam TITULO_DESCONTADO.
 
-Se este teste falhar após uma mudança legítima no motor (ex: uma nova regra
-implementada que reclassifica alguns dos 4 BANCO SEM ERP restantes), o
-procedimento correto é: investigar CADA registro que mudou de status,
-confirmar que a mudança é uma melhoria genuína (não uma heurística
-inventada), e só então atualizar os números deste teste — nunca o
-contrário (ajustar o teste sem entender a mudança).
+Se este teste falhar após uma mudança legítima no motor, o procedimento
+correto é: investigar CADA registro que mudou de status, confirmar que a
+mudança é uma melhoria genuína (não uma heurística inventada), e só então
+atualizar os números deste teste — nunca o contrário (ajustar o teste sem
+entender a mudança).
 """
 from collections import Counter
-from pathlib import Path
+from datetime import date
 
 import pytest
 
@@ -28,6 +28,8 @@ from app.importers.banks.itau_francesinha import import_itau_francesinha
 from app.importers.erp.crp032a1 import import_crp032a1
 from app.importers.erp.ffp045a2 import import_erp_ffp045a2
 from app.reconciliation.engine import ReconciliationStatus, run_reconciliation
+
+from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -68,12 +70,12 @@ def test_taxa_de_conciliacao_nao_regride(golden_results):
         ReconciliationStatus.CORTE_COMPETENCIA,
         ReconciliationStatus.CORTE_FIM_PERIODO,
         ReconciliationStatus.CONCILIADO_DESCONTO,
+        ReconciliationStatus.CONCILIADO_ANTECIPACAO,
     ))
     # Piso de segurança: obtido rodando o motor nesta sessão (8 + 639 + 128
-    # + 228 + 51 + 6 = 1060, de um total de 1164 registros). Uma mudança
-    # que derrube isso abaixo de 1055 precisa ser investigada antes de
-    # mergear.
-    assert conciliados >= 1055, (
+    # + 228 + 51 + 6 + 48 = 1108, de um total de 1164 registros). Uma
+    # mudança que derrube isso abaixo de 1100 precisa ser investigada.
+    assert conciliados >= 1100, (
         f"Conciliação caiu para {conciliados} registros — investigue antes de aceitar."
     )
 
@@ -89,7 +91,6 @@ def test_casos_reais_confirmados_continuam_corretos(golden_results):
 
     # Caso corte de competência de fim de período: 43 títulos batidos na
     # investigação manual desta sessão caem em 30/01 (última data do ERP).
-    from datetime import date
     fim_periodo = [
         r for r in results
         if r.status == ReconciliationStatus.CORTE_FIM_PERIODO
@@ -98,12 +99,13 @@ def test_casos_reais_confirmados_continuam_corretos(golden_results):
     assert len(fim_periodo) == 43
 
     # Caso título descontado: nenhuma 'liquidação de título descontado'
-    # pode aparecer como BANCO SEM ERP nem VALOR DIVERGENTE (falso
-    # positivo corrigido nesta sessão).
+    # pode aparecer como BANCO SEM ERP ou VALOR DIVERGENTE — só
+    # CONCILIADO_ANTECIPACAO (explicado) ou TITULO_DESCONTADO (residual
+    # genuíno, Regra 13).
     descontados_mal_classificados = [
         r for r in results
         if r.bank_tx and r.bank_tx.operation_type == "liquidação de título descontado"
-        and r.status != ReconciliationStatus.TITULO_DESCONTADO
+        and r.status not in (ReconciliationStatus.TITULO_DESCONTADO, ReconciliationStatus.CONCILIADO_ANTECIPACAO)
     ]
     assert descontados_mal_classificados == []
 
@@ -126,10 +128,31 @@ def test_regra12_desconto_resolve_todos_os_valor_divergente_de_janeiro(golden_re
     assert counts.get(ReconciliationStatus.CONCILIADO_DESCONTO, 0) == 6
 
 
+def test_regra13_titulo_descontado_explicado_via_antecipacao_e_crp032a1(golden_results):
+    """Achado real: dos 94 títulos descontados de janeiro/2026, 44 batem
+    1:1 com ANTECIPAÇÃO RECEBIVEIS do ERP (bijeção completa) e mais 4 com
+    o CRP032A1 (documentos que nem aparecem no FFP045A2). 46 ficam
+    genuinamente sem correspondência."""
+    results, _, _, _ = golden_results
+    counts = Counter(r.status for r in results)
+    assert counts.get(ReconciliationStatus.CONCILIADO_ANTECIPACAO, 0) == 48
+    assert counts.get(ReconciliationStatus.TITULO_DESCONTADO, 0) == 46
+
+    # Nenhuma antecipação do ERP sobra sem par no banco (bijeção completa
+    # nos dados de janeiro/2026).
+    antecipacao_sem_banco = [
+        r for r in results
+        if r.status == ReconciliationStatus.ERP_SEM_BANCO
+        and r.erp_tx and r.erp_tx.is_anticipation
+    ]
+    assert antecipacao_sem_banco == []
+
+
 def test_residuais_genuinos_estao_dentro_do_esperado(golden_results):
-    """Após separar título descontado, fora-de-escopo (PIX/depósito),
-    corte de fim de período e desconto comercial, sobra um resíduo pequeno
-    e genuíno de casos que precisam de investigação manual."""
+    """Após separar fora-de-escopo (PIX/depósito), corte de fim de
+    período, desconto comercial e título descontado explicado, sobra um
+    resíduo pequeno e genuíno de casos que precisam de investigação
+    manual."""
     results, _, _, _ = golden_results
     counts = Counter(r.status for r in results)
     assert counts.get(ReconciliationStatus.BANCO_SEM_ERP, 0) <= 10

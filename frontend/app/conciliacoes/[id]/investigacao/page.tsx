@@ -70,10 +70,10 @@ export default function InvestigacaoPage({ params }: { params: { id: string } })
           <option value="">Todos os status</option>
           {[
             "CONCILIADO", "CONCILIADO D+1", "CONCILIADO D+2", "CORTE DE COMPETÊNCIA",
-            "CONCILIADO (desconto)",
+            "CONCILIADO (desconto)", "CONCILIADO (título descontado)",
             "CORTE DE COMPETÊNCIA (fim do período importado)", "POSSÍVEL CORRESPONDÊNCIA",
             "VALOR DIVERGENTE", "BANCO SEM ERP", "ERP SEM BANCO",
-            "TÍTULO DESCONTADO (fora do escopo desta versão)",
+            "TÍTULO DESCONTADO SEM CORRESPONDÊNCIA",
           ].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>

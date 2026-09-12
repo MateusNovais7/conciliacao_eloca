@@ -162,6 +162,36 @@ class TestEscopoTituloDescontadoEForaDeCarteira:
         assert all(r.erp_tx is None or r.erp_tx.invoice_number_raw != "1011" for r in results)
 
 
+class TestRegra13TituloDescontado:
+    def test_titulo_descontado_bate_com_antecipacao_do_erp(self):
+        bank = [make_bank("1012", 3230.53, date(2026, 1, 6), op="liquidação de título descontado")]
+        erp = [make_erp("1012", 3230.53, date(2026, 1, 5), antecipacao=True)]
+        results = run_reconciliation(bank, erp)
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "1012")
+        assert r.status == ReconciliationStatus.CONCILIADO_ANTECIPACAO
+        assert r.erp_tx is not None
+
+    def test_titulo_descontado_bate_com_crp032a1_quando_nao_esta_no_erp(self):
+        bank = [make_bank("1013", 2696.00, date(2026, 1, 6), op="liquidação de título descontado")]
+        crp = [make_crp("1013", valor_emissao=2696.00, desconto=0.0, valor_pago=2696.00)]
+        results = run_reconciliation(bank, [], crp)  # sem nenhuma antecipação no ERP
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "1013")
+        assert r.status == ReconciliationStatus.CONCILIADO_ANTECIPACAO
+        assert "CRP032A1" in r.diagnostic
+
+    def test_titulo_descontado_sem_candidato_algum_fica_sem_correspondencia(self):
+        bank = [make_bank("1014", 1000.00, date(2026, 1, 6), op="liquidação de título descontado")]
+        results = run_reconciliation(bank, [])
+        r = next(r for r in results if r.bank_tx and r.bank_tx.seu_numero == "1014")
+        assert r.status == ReconciliationStatus.TITULO_DESCONTADO
+
+    def test_antecipacao_do_erp_sem_titulo_descontado_no_banco_vira_erp_sem_banco(self):
+        erp = [make_erp("1015", 500.00, date(2026, 1, 6), antecipacao=True)]
+        results = run_reconciliation([], erp)
+        r = next(r for r in results if r.erp_tx and r.erp_tx.invoice_number_raw == "1015")
+        assert r.status == ReconciliationStatus.ERP_SEM_BANCO
+
+
 class TestRegra33Idempotencia:
     def test_mesmo_titulo_nao_e_usado_duas_vezes_no_matching(self):
         # Duas liquidações com o mesmo Seu Número (parcelas diferentes já

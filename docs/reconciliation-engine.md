@@ -11,10 +11,11 @@
 | 3 | Juros | — | `valor_cliente = principal + juros` (tarifa não desconta) |
 | 4 | Valor divergente | 60/50 | Nunca força conciliação |
 | 5 | Corte de competência | 98 | Também cobre borda do período importado (`CORTE_FIM_PERIODO`) |
-| 6 | Antecipação | — | Separada na importação via `ANTECIPAÇÃO RECEBIVEIS` na descrição do ERP |
+| 6 | Antecipação (ERP) | — | Identificada via `ANTECIPAÇÃO RECEBIVEIS` na descrição do ERP; usada pela Regra 13 |
 | 7/8 | Sem correspondência | 0 | |
 | 9 | Possível correspondência | 80/70 | Busca por valor±R$0,05 + janela de 5 dias úteis + nome semelhante |
 | 12 | Desconto comercial (CRP032A1) | 96 | Fonte opcional — explica valor divergente quando `Valor Emissão − Desconto − Abatimento − Impostos + Juros + Multa` bate exatamente com a baixa do ERP |
+| 13 | Título descontado (carteira de antecipação bancária) | 95 / 90 | Casa `liquidação de título descontado` do banco com `ANTECIPAÇÃO RECEBIVEIS` do ERP (95) ou, na ausência dessa, com o CRP032A1 (90) |
 
 ## Não implementado (sem evidência real ainda)
 
@@ -23,7 +24,7 @@
 
 ## Achados de dados reais que viraram regra/escopo
 
-1. **`liquidação de título descontado`** (carteira de antecipação bancária do Itaú) tem `Valor Final = 0` sempre — comparar contra o ERP gera falso positivo de divergência. Separado em status próprio `TITULO_DESCONTADO`, fora do matching por título+valor até haver evidência de como o ERP registra essa baixa.
+1. **`liquidação de título descontado`** (carteira de antecipação bancária do Itaú) e **`ANTECIPAÇÃO RECEBIVEIS`** no ERP são A MESMA operação — cada sistema só usa um nome diferente. Confirmado em escala: dos 94 títulos descontados de janeiro/2026, os 44 lançamentos de antecipação do ERP bateram 1:1 com valor exato (bijeção completa). Mais 4 bateram exato com o CRP032A1 (documentos que nem aparecem no FFP045A2). Os 46 restantes ficam como `TITULO_DESCONTADO` (sem correspondência) — resíduo genuíno, não mais tratado como "fora de escopo".
 2. **PIX / Depósito em Conta no ERP** nunca aparecem na Francesinha de cobrança (que só cobre a carteira de boleto) — escopado via `TipoDocumento`, não contados como `ERP SEM BANCO`.
 3. **Bug conhecido do exportador ERP:** o `.xlsx` do FFP045A2 (e também o CRP032A1 — mesmo exportador) sai com stylesheet corrompida (`TypeError: expected <class Fill>`). O importador detecta e repara automaticamente via LibreOffice headless antes de processar.
 4. **Desconto comercial não aparece no FFP045A2** — a baixa já vem líquida, sem explicar por que é menor que o principal do banco. O CRP032A1 (Relação de Documentos Recebidos) tem a resposta no campo `Valor Desconto`. Testado contra os 6 casos de `VALOR DIVERGENTE` de janeiro/2026: os 6 batem exatamente. Fonte opcional — sem o CRP032A1, o comportamento continua sendo `VALOR DIVERGENTE` sem forçar nada.
@@ -32,4 +33,5 @@
 
 - 3.047 registros bancários, 1.203 recebimentos de duplicata no ERP, 3.034 documentos no CRP032A1 (24 com desconto).
 - 6/6 casos de valor divergente resolvidos pela Regra 12 — zero `VALOR DIVERGENTE` sem explicação.
-- 4 banco-sem-ERP e 6 ERP-sem-banco genuinamente sem explicação (nenhum candidato mesmo com busca fuzzy) — ficam para investigação humana, não foram forçados.
+- 48/94 títulos descontados resolvidos pela Regra 13 (44 via antecipação do ERP + 4 via CRP032A1).
+- Residual genuíno: 4 banco-sem-ERP, 6 ERP-sem-banco, 46 título-descontado-sem-correspondência — nenhum candidato encontrado em nenhuma das 3 fontes, mesmo com busca fuzzy. Ficam para investigação humana; não foram forçados.

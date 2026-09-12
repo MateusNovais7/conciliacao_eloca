@@ -118,14 +118,14 @@ def test_fluxo_completo_ponta_a_ponta(client):
     assert len(history) == 1
     assert history[0]["competencia_year"] == 2026
     assert history[0]["competencia_month"] == 1
-    assert history[0]["reconciled_pct"] > 98.0
+    assert history[0]["reconciled_pct"] > 93.0  # sem CRP032A1 nesta importação (só ERP+banco)
 
     # 5. dashboard fecha matematicamente
     r = client.get(f"/conciliacoes/{reconciliation_id}/dashboard")
     assert r.status_code == 200, r.text
     dash = r.json()
     assert sum(s["count"] for s in dash["by_status"]) == 1164
-    assert dash["reconciled_pct"] > 98.0
+    assert dash["reconciled_pct"] > 93.0  # Regra 13 já resolve os 44 títulos descontados via antecipação do ERP
 
     # 6. clicar num card = listar só aqueles títulos
     r = client.get(f"/conciliacoes/{reconciliation_id}/titulos", params={"status": "VALOR DIVERGENTE"})

@@ -70,7 +70,7 @@ def test_importacao_e_conciliacao_ponta_a_ponta_batem_com_golden_test(session, b
         "CONCILIADO", "CONCILIADO D+1", "CONCILIADO D+2",
         "CORTE DE COMPETÊNCIA", "CORTE DE COMPETÊNCIA (fim do período importado)",
     ))
-    assert conciliados == 1054  # mesmo número do Golden Test (tests/test_golden.py)
+    assert conciliados == 1054  # regras 1/2/5 (core) — Regras 12/13 (desconto/antecipação) somam à parte
 
     # Confere que as linhas de match têm FK reais para bank/erp transactions
     # persistidas (não ficaram soltas sem referência).

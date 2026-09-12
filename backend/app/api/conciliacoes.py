@@ -33,11 +33,8 @@ router = APIRouter(prefix="/conciliacoes", tags=["conciliacoes"])
 RECONCILED_STATUSES = {
     "CONCILIADO", "CONCILIADO D+1", "CONCILIADO D+2",
     "CORTE DE COMPETÊNCIA", "CORTE DE COMPETÊNCIA (fim do período importado)",
-    "CONCILIADO MANUALMENTE", "CONCILIADO (desconto)",
+    "CONCILIADO MANUALMENTE", "CONCILIADO (desconto)", "CONCILIADO (título descontado)",
 }
-
-
-OUT_OF_SCOPE_STATUSES = {"TÍTULO DESCONTADO (fora do escopo desta versão)"}
 
 
 def _get_reconciliation_or_404(session: Session, reconciliation_id: UUID) -> Reconciliation:
@@ -52,11 +49,11 @@ def _compute_reconciled_pct(session: Session, reconciliation_id: UUID) -> float:
         status for (status,) in
         session.query(ReconciliationMatchRow.status).filter_by(reconciliation_id=reconciliation_id).all()
     )
-    total_in_scope = sum(c for s, c in counts.items() if s not in OUT_OF_SCOPE_STATUSES)
-    if not total_in_scope:
+    total = sum(counts.values())
+    if not total:
         return 0.0
     reconciled = sum(c for s, c in counts.items() if s in RECONCILED_STATUSES)
-    return round(100 * reconciled / total_in_scope, 2)
+    return round(100 * reconciled / total, 2)
 
 
 @router.delete("/{reconciliation_id}", status_code=204)
@@ -177,13 +174,12 @@ def dashboard(reconciliation_id: UUID, session: Session = Depends(get_session), 
     reconciled_amount = sum(c.total_amount for c in by_status if c.status in RECONCILED_STATUSES)
     divergent_amount = sum(c.total_amount for c in by_status if c.status == "VALOR DIVERGENTE")
 
-    # % de conciliação é calculada sobre o universo de títulos realmente no
-    # escopo do matching — exclui 'título descontado' (carteira de
-    # antecipação bancária, fora do escopo desta versão, ver engine.py),
-    # senão o denominador fica inflado com registros que nunca poderiam
-    # ser conciliados por título+valor.
-    in_scope_count = sum(c.count for c in by_status if c.status not in OUT_OF_SCOPE_STATUSES)
-
+    # % de conciliação sobre o total de registros do motor. Título
+    # descontado deixou de ser tratado como estruturalmente fora de escopo
+    # (Regra 13 já explica a maioria via antecipação/CRP032A1) — o que
+    # sobrar sem explicação entra no denominador como qualquer outro
+    # residual (banco-sem-ERP, ERP-sem-banco), sem inflar nem esconder.
+    total_matches = sum(c.count for c in by_status)
 
     bank_titles_count = session.query(BankTransaction).filter_by(
         bank_account_id=reconciliation.bank_account_id,
@@ -199,7 +195,7 @@ def dashboard(reconciliation_id: UUID, session: Session = Depends(get_session), 
         bank_titles_count=bank_titles_count,
         erp_titles_count=erp_titles_count,
         reconciled_count=reconciled_count,
-        reconciled_pct=round(100 * reconciled_count / in_scope_count, 2) if in_scope_count else 0.0,
+        reconciled_pct=round(100 * reconciled_count / total_matches, 2) if total_matches else 0.0,
         reconciled_amount=round(reconciled_amount, 2),
         divergent_amount=round(divergent_amount, 2),
         by_status=by_status,

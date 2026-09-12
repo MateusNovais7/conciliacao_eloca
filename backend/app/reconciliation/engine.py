@@ -14,6 +14,8 @@ Implementado nesta versão (evidenciado nos arquivos reais MEATHUNTER / Itaú
   Regra 9  — possível correspondência por proximidade (valor + cliente + data)
   Regra 12 — desconto comercial explica o valor divergente (fonte:
              CRP032A1, opcional — ver mais abaixo)
+  Regra 13 — título descontado explicado via antecipação do ERP ou
+             CRP032A1 (ver mais abaixo)
 
 DELIBERADAMENTE AINDA NÃO IMPLEMENTADO (aguardando mais evidência/decisão,
 conforme item 31 do prompt — não inventar regra sem evidência):
@@ -37,6 +39,17 @@ janeiro/2026: **os 6 batem exatamente** com o desconto do CRP032A1. Por ser
 uma fonte OPCIONAL (nem toda competência vai ter um CRP032A1 enviado), o
 motor só aplica essa regra quando `crp_docs` é fornecido — sem ele, o
 comportamento é idêntico ao de antes (VALOR DIVERGENTE sem explicação).
+
+REGRA 13 — TÍTULO DESCONTADO (achado real, janeiro/2026): 'liquidação de
+título descontado' no banco (carteira de antecipação/factoring do Itaú) e
+'ANTECIPAÇÃO RECEBIVEIS' no ERP são A MESMA operação, cada sistema só usa
+um nome diferente. Testado: dos 94 títulos descontados de janeiro/2026, os
+44 lançamentos de antecipação do ERP bateram 1:1 com valor exato (bijeção
+completa — nenhuma antecipação do ERP ficou de fora). Mais 4 bateram exato
+com o CRP032A1 (documentos que nem aparecem no FFP045A2). Os 46 restantes
+ficam como TITULO_DESCONTADO (sem correspondência) — não é mais tratado
+como 'fora de escopo', é um residual genuíno como qualquer outro, sujeito a
+investigação manual.
 """
 from __future__ import annotations
 
@@ -63,16 +76,13 @@ SETTLEMENT_OPERATION_TYPES = {
     "baixa por ter sido liquidado",
 }
 
-# Achado real ao rodar contra os dados de janeiro/2026: 100% das 94
-# liquidações do tipo 'liquidação de título descontado' vieram como
-# BANCO SEM ERP. 'Título descontado' é a carteira de antecipação bancária
-# do Itaú (o cliente já recebeu o valor adiantado em outro momento) — não
-# é o mesmo fluxo de caixa de uma liquidação normal, então comparar seu
-# valor cheio contra 'Rec. Dup.' do ERP produz falso positivo de
-# divergência. Fica de fora do matching por título+valor até termos
-# evidência de como o ERP registra a liquidação da carteira descontada.
-# Ver DISCOUNTED_TITLE_OPERATION_TYPES abaixo — mantidos separados e
-# reportados à parte, não descartados silenciosamente.
+# Achado real ao rodar contra os dados de janeiro/2026: 'título descontado'
+# é a carteira de antecipação bancária do Itaú (factoring) — o fluxo de
+# caixa é diferente de uma liquidação normal, então comparar seu valor
+# cheio contra 'Rec. Dup.' do ERP produzia falso positivo de divergência.
+# Tratado separadamente do matching normal por título+valor — ver Regra 13
+# mais abaixo, que casa esses lançamentos contra ANTECIPAÇÃO RECEBIVEIS do
+# ERP (ou CRP032A1), em vez de descartá-los.
 DISCOUNTED_TITLE_OPERATION_TYPES = {
     "liquidação de título descontado",
 }
@@ -96,7 +106,8 @@ class ReconciliationStatus(str, Enum):
     BANCO_SEM_ERP = "BANCO SEM ERP"
     ERP_SEM_BANCO = "ERP SEM BANCO"
     VALOR_DIVERGENTE = "VALOR DIVERGENTE"
-    TITULO_DESCONTADO = "TÍTULO DESCONTADO (fora do escopo desta versão)"
+    TITULO_DESCONTADO = "TÍTULO DESCONTADO SEM CORRESPONDÊNCIA"
+    CONCILIADO_ANTECIPACAO = "CONCILIADO (título descontado)"
     CORTE_FIM_PERIODO = "CORTE DE COMPETÊNCIA (fim do período importado)"
     POSSIVEL_CORRESPONDENCIA = "POSSÍVEL CORRESPONDÊNCIA"
     CONCILIADO_DESCONTO = "CONCILIADO (desconto)"
@@ -419,16 +430,84 @@ def run_reconciliation(
                 ),
             ))
 
+    # Regra 13 — título descontado (carteira de antecipação bancária do
+    # Itaú) explicado via ANTECIPAÇÃO RECEBIVEIS do ERP ou via CRP032A1.
+    # Achado real: dos 94 títulos descontados de janeiro/2026, os 44
+    # lançamentos de antecipação do ERP batem 1:1 e com valor exato — é a
+    # MESMA operação, cada sistema só usa um nome diferente pra ela. Mais 4
+    # batem exato com o CRP032A1 (documentos que nem aparecem no FFP045A2).
+    # Os 46 restantes ficam genuinamente sem explicação — sem inventar.
+    antecipacao_erp = [
+        t for t in erp_txs
+        if t.is_anticipation and t.tipo_documento in ERP_TIPO_DOCUMENTO_IN_SCOPE
+    ]
+    antecipacao_by_title: dict[str, ERPTransaction] = {}
+    for t in antecipacao_erp:
+        if t.normalized_title:
+            antecipacao_by_title.setdefault(t.normalized_title, t)
+    matched_antecipacao_titles: set[str] = set()
+
     for bank_tx in discounted_bank:
+        candidate = antecipacao_by_title.get(bank_tx.normalized_title)
+        if (
+            candidate is not None and bank_tx.client_amount is not None
+            and candidate.incoming_amount is not None
+            and abs(bank_tx.client_amount - candidate.incoming_amount) <= AMOUNT_TOLERANCE
+        ):
+            matched_antecipacao_titles.add(bank_tx.normalized_title)
+            results.append(ReconciliationMatch(
+                status=ReconciliationStatus.CONCILIADO_ANTECIPACAO,
+                bank_tx=bank_tx, erp_tx=candidate, confidence=95,
+                diagnostic=(
+                    f"Título {bank_tx.seu_numero}: liquidado via carteira de título descontado "
+                    f"(antecipação bancária) em {bank_tx.movement_date:%d/%m/%Y}, R$ {bank_tx.client_amount:.2f}. "
+                    f"Confirmado no ERP como 'ANTECIPAÇÃO RECEBIVEIS', mesmo valor."
+                ),
+            ))
+            continue
+
+        crp = crp_by_title.get(bank_tx.normalized_title)
+        if (
+            crp is not None and bank_tx.client_amount is not None and crp.valor_pago is not None
+            and abs(bank_tx.client_amount - crp.valor_pago) <= AMOUNT_TOLERANCE
+        ):
+            results.append(ReconciliationMatch(
+                status=ReconciliationStatus.CONCILIADO_ANTECIPACAO,
+                bank_tx=bank_tx, erp_tx=None, confidence=90,
+                diagnostic=(
+                    f"Título {bank_tx.seu_numero}: liquidado via carteira de título descontado "
+                    f"(antecipação bancária) em {bank_tx.movement_date:%d/%m/%Y}, R$ {bank_tx.client_amount:.2f}. "
+                    f"Não está no FFP045A2, mas confirmado no CRP032A1 (documento {crp.documento}), mesmo valor."
+                ),
+            ))
+            continue
+
         results.append(ReconciliationMatch(
             status=ReconciliationStatus.TITULO_DESCONTADO,
             bank_tx=bank_tx, erp_tx=None, confidence=0,
             diagnostic=(
                 f"Título {bank_tx.seu_numero} liquidado via carteira de título descontado "
-                f"(antecipação bancária) em {bank_tx.movement_date:%d/%m/%Y}, R$ {bank_tx.principal_amount:.2f}. "
-                f"Fluxo de caixa diferente de uma liquidação normal — não comparado nesta versão."
+                f"(antecipação bancária) em {bank_tx.movement_date:%d/%m/%Y}, "
+                f"R$ {(bank_tx.client_amount or bank_tx.principal_amount or 0):.2f}. "
+                f"Não encontrado como antecipação no ERP nem no CRP032A1 — verificar manualmente se "
+                f"o documento foi lançado no ERP com outra classificação ou se ainda não foi baixado."
             ),
         ))
+
+    # Antecipação do ERP sem nenhum título descontado correspondente no
+    # banco (não observado em janeiro/2026, mas tratado por segurança —
+    # ver item 39, não deixar nada sem status).
+    for t in antecipacao_erp:
+        if t.normalized_title and t.normalized_title not in matched_antecipacao_titles:
+            results.append(ReconciliationMatch(
+                status=ReconciliationStatus.ERP_SEM_BANCO,
+                bank_tx=None, erp_tx=t, confidence=0,
+                diagnostic=(
+                    f"ERP registra antecipação de recebíveis para o título {t.invoice_number_raw} "
+                    f"em {t.transaction_date:%d/%m/%Y} (R$ {t.incoming_amount:.2f}), sem nenhuma "
+                    f"liquidação de título descontado correspondente encontrada no banco."
+                ),
+            ))
 
     for t in receivable_erp:
         if id(t) not in matched_erp_ids:
@@ -474,9 +553,10 @@ if __name__ == "__main__":
         + counts.get(ReconciliationStatus.CONCILIADO_D2, 0) \
         + counts.get(ReconciliationStatus.CORTE_COMPETENCIA, 0) \
         + counts.get(ReconciliationStatus.CORTE_FIM_PERIODO, 0) \
-        + counts.get(ReconciliationStatus.CONCILIADO_DESCONTO, 0)
-    settled_bank_count = len(settled_bank) if (settled_bank := [t for t in bank_txs if t.operation_type in SETTLEMENT_OPERATION_TYPES]) else 0
-    pct = 100 * total_conciliado / settled_bank_count if settled_bank_count else 0
+        + counts.get(ReconciliationStatus.CONCILIADO_DESCONTO, 0) \
+        + counts.get(ReconciliationStatus.CONCILIADO_ANTECIPACAO, 0)
+    total_registros = len(results)
+    pct = 100 * total_conciliado / total_registros if total_registros else 0
     print(f"\n% conciliação (sobre liquidações bancárias): {pct:.2f}%")
 
     print("\n--- Amostra de BANCO SEM ERP ---")
