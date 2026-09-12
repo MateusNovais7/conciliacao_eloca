@@ -2,6 +2,7 @@ import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import type { Dashboard } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { BackButton } from "@/components/BackButton";
 
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -19,6 +20,7 @@ export default async function DashboardPage({ params }: { params: { id: string }
   if (error || !dashboard) {
     return (
       <main className="mx-auto max-w-4xl px-6 py-12">
+        <BackButton fallbackHref="/" />
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
       </main>
     );
@@ -28,6 +30,7 @@ export default async function DashboardPage({ params }: { params: { id: string }
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
+      <BackButton fallbackHref="/" />
       <div className="mb-8 flex items-end justify-between">
         <div>
           <p className="text-sm text-slate-500">Conciliação</p>

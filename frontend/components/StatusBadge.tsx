@@ -11,6 +11,13 @@ const STATUS_STYLES: Record<string, string> = {
   "ERP SEM BANCO": "bg-red-50 text-red-800 border-red-200",
   "TÍTULO DESCONTADO (fora do escopo desta versão)": "bg-slate-100 text-slate-500 border-slate-200",
   "IGNORADO": "bg-slate-100 text-slate-400 border-slate-200",
+  // Status de ciclo de vida da competência (item 20) — distintos dos
+  // status por título acima.
+  "RASCUNHO": "bg-slate-100 text-slate-600 border-slate-300",
+  "EM_ANALISE": "bg-amber-50 text-amber-800 border-amber-200",
+  "CONCILIADA": "bg-teal-50 text-teal-800 border-teal-200",
+  "FECHADA": "bg-slate-800 text-white border-slate-800",
+  "REABERTA": "bg-amber-50 text-amber-800 border-amber-200",
 };
 
 export function StatusBadge({ status }: { status: string }) {

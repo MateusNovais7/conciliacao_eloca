@@ -21,6 +21,7 @@ from app.schemas.reconciliation import (
     DashboardStatusCount,
     ManualAdjustmentCreate,
     ReconciliationCreate,
+    ReconciliationHistoryItem,
     ReconciliationMatchDetailOut,
     ReconciliationMatchOut,
     ReconciliationOut,
@@ -36,11 +37,51 @@ RECONCILED_STATUSES = {
 }
 
 
+OUT_OF_SCOPE_STATUSES = {"TÍTULO DESCONTADO (fora do escopo desta versão)"}
+
+
 def _get_reconciliation_or_404(session: Session, reconciliation_id: UUID) -> Reconciliation:
     reconciliation = session.get(Reconciliation, reconciliation_id)
     if reconciliation is None:
         raise HTTPException(status_code=404, detail="Conciliação não encontrada.")
     return reconciliation
+
+
+def _compute_reconciled_pct(session: Session, reconciliation_id: UUID) -> float:
+    counts = Counter(
+        status for (status,) in
+        session.query(ReconciliationMatchRow.status).filter_by(reconciliation_id=reconciliation_id).all()
+    )
+    total_in_scope = sum(c for s, c in counts.items() if s not in OUT_OF_SCOPE_STATUSES)
+    if not total_in_scope:
+        return 0.0
+    reconciled = sum(c for s, c in counts.items() if s in RECONCILED_STATUSES)
+    return round(100 * reconciled / total_in_scope, 2)
+
+
+@router.get("", response_model=list[ReconciliationHistoryItem])
+def list_reconciliations(
+    bank_account_id: UUID,
+    session: Session = Depends(get_session),
+    _=Depends(require_api_key),
+):
+    """Item 22 — histórico de competências de uma conta, com o percentual
+    já calculado, para a tela de histórico do cliente não obrigar o
+    usuário a reimportar tudo de novo só pra ver onde parou."""
+    reconciliations = (
+        session.query(Reconciliation)
+        .filter_by(bank_account_id=bank_account_id)
+        .order_by(Reconciliation.competencia_year.desc(), Reconciliation.competencia_month.desc())
+        .all()
+    )
+    return [
+        ReconciliationHistoryItem(
+            id=r.id, competencia_year=r.competencia_year, competencia_month=r.competencia_month,
+            status=r.status.value, reconciled_pct=_compute_reconciled_pct(session, r.id),
+            created_at=r.created_at, closed_at=r.closed_at,
+        )
+        for r in reconciliations
+    ]
 
 
 @router.post("", response_model=ReconciliationOut, status_code=201)
@@ -101,7 +142,6 @@ def dashboard(reconciliation_id: UUID, session: Session = Depends(get_session), 
     # antecipação bancária, fora do escopo desta versão, ver engine.py),
     # senão o denominador fica inflado com registros que nunca poderiam
     # ser conciliados por título+valor.
-    OUT_OF_SCOPE_STATUSES = {"TÍTULO DESCONTADO (fora do escopo desta versão)"}
     in_scope_count = sum(c.count for c in by_status if c.status not in OUT_OF_SCOPE_STATUSES)
 
 

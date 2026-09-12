@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
+import { BackButton } from "@/components/BackButton";
 
 type DailyRow = {
   date: string;
@@ -31,6 +32,7 @@ export default async function ConciliacaoDiariaPage({ params }: { params: { id: 
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12">
+      <BackButton fallbackHref={`/conciliacoes/${params.id}`} />
       <h1 className="text-2xl font-semibold tracking-tight">Conciliação diária</h1>
       <p className="mt-1 text-sm text-slate-500">
         Compara o total liquidado no banco com o total baixado no ERP, dia a dia.

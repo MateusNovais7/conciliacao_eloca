@@ -111,6 +111,15 @@ def test_fluxo_completo_ponta_a_ponta(client):
     assert r.status_code == 200, r.text
     assert len(r.json()) == 1164
 
+    # 4b. histórico da conta mostra essa competência com o percentual certo
+    r = client.get("/conciliacoes", params={"bank_account_id": account_id})
+    assert r.status_code == 200, r.text
+    history = r.json()
+    assert len(history) == 1
+    assert history[0]["competencia_year"] == 2026
+    assert history[0]["competencia_month"] == 1
+    assert history[0]["reconciled_pct"] > 98.0
+
     # 5. dashboard fecha matematicamente
     r = client.get(f"/conciliacoes/{reconciliation_id}/dashboard")
     assert r.status_code == 200, r.text

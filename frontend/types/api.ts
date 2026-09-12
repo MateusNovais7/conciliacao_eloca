@@ -61,6 +61,16 @@ export type Dashboard = {
   by_status: DashboardStatusCount[];
 };
 
+export type ReconciliationHistoryItem = {
+  id: string;
+  competencia_year: number;
+  competencia_month: number;
+  status: string;
+  reconciled_pct: number;
+  created_at: string;
+  closed_at: string | null;
+};
+
 export type ReconciliationMatch = {
   id: string;
   status: string;

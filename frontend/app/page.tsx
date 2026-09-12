@@ -13,19 +13,11 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <header className="mb-10 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Conciliação Bancária</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Importe o ERP e o extrato do banco — o resto a gente explica.
-          </p>
-        </div>
-        <Link
-          href="/nova-conciliacao"
-          className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800"
-        >
-          Nova conciliação
-        </Link>
+      <header className="mb-10">
+        <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Escolha um cliente para ver o histórico de conciliações, ou importe uma nova.
+        </p>
       </header>
 
       {error && (
@@ -44,10 +36,16 @@ export default async function HomePage() {
       )}
 
       {!error && clients.length > 0 && (
-        <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+        <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
           {clients.map((c) => (
-            <li key={c.id} className="px-5 py-4">
-              <span className="font-medium">{c.name}</span>
+            <li key={c.id}>
+              <Link
+                href={`/clientes/${c.id}`}
+                className="flex items-center justify-between px-5 py-4 transition-colors hover:bg-slate-50"
+              >
+                <span className="font-medium">{c.name}</span>
+                <span className="text-slate-400">→</span>
+              </Link>
             </li>
           ))}
         </ul>

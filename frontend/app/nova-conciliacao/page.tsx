@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import type { BankAccount, Client, ImportFile } from "@/types/api";
+import { BackButton } from "@/components/BackButton";
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -20,12 +21,21 @@ function StepStatus({ state, doneLabel, idleLabel }: { state: StepState; doneLab
 }
 
 export default function NovaConciliacaoPage() {
+  return (
+    <Suspense>
+      <NovaConciliacaoForm />
+    </Suspense>
+  );
+}
+
+function NovaConciliacaoForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(searchParams.get("client_id") ?? "");
   const [newClientName, setNewClientName] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(searchParams.get("bank_account_id") ?? "");
   const [newAccount, setNewAccount] = useState({ bank: "Itaú", agency: "", account_number: "" });
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -126,6 +136,7 @@ export default function NovaConciliacaoPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
+      <BackButton fallbackHref="/" />
       <h1 className="text-2xl font-semibold tracking-tight">Nova conciliação</h1>
       <p className="mt-1 text-sm text-slate-500">Importe o relatório do ERP e o extrato do banco para esta competência.</p>
 

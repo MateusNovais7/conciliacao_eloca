@@ -47,6 +47,16 @@ class ReconciliationOut(BaseModel):
     closed_by: str | None
 
 
+class ReconciliationHistoryItem(BaseModel):
+    id: UUID
+    competencia_year: int
+    competencia_month: int
+    status: str
+    reconciled_pct: float
+    created_at: datetime
+    closed_at: datetime | None
+
+
 class DashboardStatusCount(BaseModel):
     status: str
     count: int

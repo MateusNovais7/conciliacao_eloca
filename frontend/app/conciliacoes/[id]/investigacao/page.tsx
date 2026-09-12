@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import type { ReconciliationMatch, ReconciliationMatchDetail } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { BackButton } from "@/components/BackButton";
 
 const MANUAL_REASONS = [
   { value: "NUMERACAO_DIFERENTE", label: "Numeração diferente" },
@@ -46,6 +47,7 @@ export default function InvestigacaoPage({ params }: { params: { id: string } })
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
+      <BackButton fallbackHref={`/conciliacoes/${params.id}`} />
       <h1 className="text-2xl font-semibold tracking-tight">Investigação</h1>
       <p className="mt-1 text-sm text-slate-500">Pesquise título, cliente, valor, NF ou documento.</p>
 
