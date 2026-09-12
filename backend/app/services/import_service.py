@@ -127,6 +127,34 @@ def import_erp_file(
     return import_file, False
 
 
+def _backfill_bank_transactions(session: Session, import_file: ImportFile, file_path: Path) -> int:
+    """Preenche campos que ainda estejam vazios em BankTransaction já
+    persistidas, usando o arquivo recém-reenviado (mesmo hash) como
+    fonte fresca — sem duplicar linha nenhuma. Casa por Nosso Número."""
+    frescos = import_itau_francesinha(file_path)
+    existentes = {
+        row.nosso_numero: row
+        for row in session.query(BankTransactionRow).filter_by(import_file_id=import_file.id).all()
+    }
+    atualizados = 0
+    for t in frescos:
+        row = existentes.get(t.nosso_numero)
+        if row is None:
+            continue
+        mudou = False
+        if row.due_date is None and t.due_date is not None:
+            row.due_date = t.due_date
+            mudou = True
+        if row.agency is None and t.agency is not None:
+            row.agency = t.agency
+            mudou = True
+        if mudou:
+            atualizados += 1
+    if atualizados:
+        session.commit()
+    return atualizados
+
+
 def import_bank_file(
     session: Session,
     bank_account_id: UUID,
@@ -140,6 +168,15 @@ def import_bank_file(
     file_hash = _file_hash(file_path)
     existing = _find_existing_import(session, bank_account_id, file_hash)
     if existing:
+        # Achado real: o storage/uploads não é persistente entre deploys
+        # no ambiente do cliente — o arquivo original de uma importação
+        # antiga pode não existir mais no servidor. Em vez de depender
+        # dele para um backfill futuro (ver reprocessar-banco), aproveita
+        # que o próprio reenvio (mesmo hash = mesmo conteúdo) já traz o
+        # arquivo fresco na mão, e preenche campos que ainda estejam
+        # vazios (ex: due_date/agency, adicionados depois de algumas
+        # importações antigas) sem duplicar nada.
+        _backfill_bank_transactions(session, existing, file_path)
         return existing, True
 
     bank_account = session.get(BankAccount, bank_account_id)

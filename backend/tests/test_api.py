@@ -508,6 +508,64 @@ def test_reprocessar_banco_faz_backfill_de_due_date_e_agency(client):
     assert linha.agency is not None
 
 
+def test_reenviar_mesmo_arquivo_faz_backfill_mesmo_sem_o_original_no_servidor(client):
+    """Cenário real relatado: storage/uploads não é persistente entre
+    deploys — o arquivo original de uma importação antiga pode não
+    existir mais no servidor, então /reprocessar-banco falha. Reenviar o
+    mesmo arquivo (que o usuário ainda tem no computador) precisa
+    preencher os campos vazios mesmo assim, sem duplicar nada."""
+    r = client.post("/clientes", json={"name": "Cliente Reenvio"})
+    client_id = r.json()["id"]
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "98967-1",
+    })
+    account_id = r.json()["id"]
+
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    bank_file_id = r.json()["id"]
+
+    from app.database.deps import get_session as _get_session_dep
+    from app.models.bank_transaction import BankTransaction
+    import uuid as _uuid
+    bank_file_uuid = _uuid.UUID(bank_file_id)
+    session = next(app.dependency_overrides[_get_session_dep]())
+    session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).update(
+        {"due_date": None, "agency": None}
+    )
+    session.commit()
+
+    # Reenvia o MESMO arquivo (simula o usuário fazendo isso de novo pelo
+    # formulário, sem que o arquivo original esteja mais no servidor —
+    # nem chegamos a tocar em storage_path aqui, só no arquivo recém-enviado)
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco-de-novo.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r.status_code == 200  # reaproveitado, não criou de novo
+    assert r.json()["id"] == bank_file_id
+
+    total = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).count()
+    assert total == 3047  # não duplicou nenhuma linha
+
+    ainda_vazio = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).filter(
+        BankTransaction.due_date.is_(None)
+    ).count()
+    assert ainda_vazio < 3047  # o backfill aconteceu
+
+    linha = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid, seu_numero="700521").first()
+    assert linha.due_date is not None
+    assert linha.agency is not None
+
+
 
 
 
