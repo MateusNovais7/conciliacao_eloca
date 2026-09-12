@@ -143,7 +143,7 @@ export default function NovaConciliacaoPage() {
           {!clientId && (
             <input
               className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              placeholder="Nome do novo cliente (ex: MEATHUNTER)"
+              placeholder="Nome do novo cliente"
               value={newClientName}
               onChange={(e) => setNewClientName(e.target.value)}
             />
