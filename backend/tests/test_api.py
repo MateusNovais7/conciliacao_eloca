@@ -451,5 +451,63 @@ def test_recuperacao_de_titulos_apagados_via_ftp050(client):
     assert "selecionarPorValor" in r.text
 
 
+def test_reprocessar_banco_faz_backfill_de_due_date_e_agency(client):
+    r = client.post("/clientes", json={"name": "Cliente Backfill"})
+    client_id = r.json()["id"]
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "98967-1",
+    })
+    account_id = r.json()["id"]
+
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    bank_file_id = r.json()["id"]
+
+    # Simula dados "antigos" (importados antes de due_date/agency
+    # existirem): zera esses campos direto no banco, como se o backfill
+    # nunca tivesse acontecido.
+    from app.database.deps import get_session as _get_session_dep
+    from app.models.bank_transaction import BankTransaction
+    import uuid as _uuid
+    bank_file_uuid = _uuid.UUID(bank_file_id)
+    override = app.dependency_overrides[_get_session_dep]
+    session = next(override())
+    session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).update(
+        {"due_date": None, "agency": None}
+    )
+    session.commit()
+    ainda_vazio = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).filter(
+        BankTransaction.due_date.is_(None)
+    ).count()
+    assert ainda_vazio == 3047  # confirma que a simulação zerou tudo
+
+    r = client.post(f"/importacoes/{bank_file_id}/reprocessar-banco")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Nem toda linha tem Vencimento/Agência reais (algumas vêm com "-" na
+    # Francesinha) — não é 100% das 3047, mas deve ser a grande maioria.
+    assert body["transacoes_atualizadas"] > 2900
+
+    ainda_vazio_depois = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).filter(
+        BankTransaction.due_date.is_(None)
+    ).count()
+    assert ainda_vazio_depois < ainda_vazio
+
+    # Não duplicou nenhuma linha
+    total = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid).count()
+    assert total == 3047
+
+    # Caso real: título 700521, vencimento conhecido
+    linha = session.query(BankTransaction).filter_by(import_file_id=bank_file_uuid, seu_numero="700521").first()
+    assert linha.due_date is not None
+    assert linha.agency is not None
+
+
+
 
 

@@ -7,11 +7,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
-from uuid import UUID
 
 from app.api.auth import require_api_key
 from app.database.deps import get_session
+from app.importers.banks.itau_francesinha import import_itau_francesinha
 from app.models.bank_account import BankAccount
+from app.models.bank_transaction import BankTransaction as BankTransactionRow
 from app.models.import_file import ImportFile
 from app.schemas.reconciliation import ImportFileOut
 from app.services.import_service import (
@@ -239,3 +240,68 @@ def upload_ftp021a1_file(
     if reused:
         response.status_code = 200
     return import_file
+
+
+@router.post("/{import_file_id}/reprocessar-banco")
+def reprocessar_arquivo_banco(
+    import_file_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key),
+):
+    """Backfill pontual: relê o arquivo original do banco (guardado em
+    storage_path — item 6, nunca alteramos/descartamos o original) e
+    atualiza campos que passaram a existir DEPOIS que este arquivo já
+    tinha sido importado (ex: 'due_date'/'agency', adicionados após
+    alguns clientes já terem importações antigas). Não duplica nada —
+    casa pelo Nosso Número e só preenche campos que ainda estão vazios.
+    Nunca mexe em ReconciliationMatchRow nem cria uma nova importação."""
+    import_file = session.get(ImportFile, import_file_id)
+    if import_file is None:
+        raise HTTPException(status_code=404, detail="Arquivo de importação não encontrado.")
+    if import_file.kind != "BANK":
+        raise HTTPException(status_code=422, detail="Este endpoint só reprocessa arquivos do tipo BANK (Francesinha).")
+
+    original_path = Path(import_file.storage_path)
+    if not original_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "O arquivo original não foi encontrado no servidor (storage_path "
+                f"'{import_file.storage_path}'). Pode ter sido um upload feito antes "
+                "do volume de armazenamento atual — nesse caso, é preciso reimportar "
+                "o arquivo original manualmente."
+            ),
+        )
+
+    try:
+        frescos = import_itau_francesinha(original_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail="Não foi possível reprocessar o arquivo original — verifique se ele não foi corrompido.",
+        ) from e
+
+    existentes = {
+        row.nosso_numero: row
+        for row in session.query(BankTransactionRow).filter_by(import_file_id=import_file.id).all()
+    }
+
+    atualizados = 0
+    for t in frescos:
+        row = existentes.get(t.nosso_numero)
+        if row is None:
+            continue
+        mudou = False
+        if row.due_date is None and t.due_date is not None:
+            row.due_date = t.due_date
+            mudou = True
+        if row.agency is None and t.agency is not None:
+            row.agency = t.agency
+            mudou = True
+        if mudou:
+            atualizados += 1
+
+    session.commit()
+    return {
+        "import_file_id": str(import_file.id),
+        "transacoes_no_arquivo": len(frescos),
+        "transacoes_atualizadas": atualizados,
+    }
