@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { FileCheck2, FileSpreadsheet, UploadCloud } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { BankAccount, Client, ImportFile } from "@/types/api";
 import { BackButton } from "@/components/BackButton";
@@ -15,9 +16,9 @@ type StepState = "idle" | "loading" | "done" | "error";
 
 function StepStatus({ state, doneLabel, idleLabel }: { state: StepState; doneLabel: string; idleLabel: string }) {
   if (state === "done") return <p className="text-sm text-teal-700">✓ {doneLabel}</p>;
-  if (state === "loading") return <p className="text-sm text-slate-500">Processando…</p>;
+  if (state === "loading") return <p className="text-sm text-stone-500">Processando…</p>;
   if (state === "error") return null;
-  return <p className="text-sm text-slate-400">{idleLabel}</p>;
+  return <p className="text-sm text-stone-400">{idleLabel}</p>;
 }
 
 export default function NovaConciliacaoPage() {
@@ -137,14 +138,14 @@ function NovaConciliacaoForm() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <BackButton fallbackHref="/" />
-      <h1 className="text-2xl font-semibold tracking-tight">Nova conciliação</h1>
-      <p className="mt-1 text-sm text-slate-500">Importe o relatório do ERP e o extrato do banco para esta competência.</p>
+      <h1 className="text-2xl font-semibold tracking-tight text-stone-900">Nova conciliação</h1>
+      <p className="mt-1 text-sm text-stone-500">Importe o relatório do ERP e o extrato do banco para esta competência.</p>
 
-      <section className="mt-8 space-y-6 rounded-xl border border-slate-200 bg-white p-6">
+      <section className="mt-8 space-y-6 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Cliente</label>
+          <label className="block text-sm font-medium text-stone-700">Cliente</label>
           <select
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
             value={clientId}
             onChange={(e) => { setClientId(e.target.value); setAccountId(""); }}
           >
@@ -153,7 +154,7 @@ function NovaConciliacaoForm() {
           </select>
           {!clientId && (
             <input
-              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="mt-2 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
               placeholder="Nome do novo cliente"
               value={newClientName}
               onChange={(e) => setNewClientName(e.target.value)}
@@ -163,9 +164,9 @@ function NovaConciliacaoForm() {
 
         {clientId && (
           <div>
-            <label className="block text-sm font-medium text-slate-700">Conta</label>
+            <label className="block text-sm font-medium text-stone-700">Conta</label>
             <select
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
             >
@@ -177,19 +178,19 @@ function NovaConciliacaoForm() {
             {!accountId && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <input
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-md border border-stone-300 px-3 py-2 text-sm"
                   placeholder="Banco (ex: Itaú)"
                   value={newAccount.bank}
                   onChange={(e) => setNewAccount({ ...newAccount, bank: e.target.value })}
                 />
                 <input
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-md border border-stone-300 px-3 py-2 text-sm"
                   placeholder="Agência"
                   value={newAccount.agency}
                   onChange={(e) => setNewAccount({ ...newAccount, agency: e.target.value })}
                 />
                 <input
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-md border border-stone-300 px-3 py-2 text-sm"
                   placeholder="Conta (ex: 98967-1)"
                   value={newAccount.account_number}
                   onChange={(e) => setNewAccount({ ...newAccount, account_number: e.target.value })}
@@ -201,9 +202,9 @@ function NovaConciliacaoForm() {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700">Competência</label>
+            <label className="block text-sm font-medium text-stone-700">Competência</label>
             <select
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
               value={month}
               onChange={(e) => setMonth(Number(e.target.value))}
             >
@@ -211,10 +212,10 @@ function NovaConciliacaoForm() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Ano</label>
+            <label className="block text-sm font-medium text-stone-700">Ano</label>
             <input
               type="number"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
             />
@@ -222,9 +223,9 @@ function NovaConciliacaoForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Seu e-mail ou usuário</label>
+          <label className="block text-sm font-medium text-stone-700">Seu e-mail ou usuário</label>
           <input
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
             placeholder="voce@empresa.com"
             value={importedBy}
             onChange={(e) => setImportedBy(e.target.value)}
@@ -255,8 +256,9 @@ function NovaConciliacaoForm() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800 disabled:opacity-50"
         >
+          <UploadCloud size={16} strokeWidth={2.25} />
           {submitting ? "Importando e conciliando…" : "Importar e conciliar"}
         </button>
       </section>
@@ -278,12 +280,17 @@ function FileDrop({
         const f = e.dataTransfer.files?.[0];
         if (f) onFile(f);
       }}
-      className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
-        dragOver ? "border-teal-500 bg-teal-50" : "border-slate-300 bg-slate-50"
+      className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-7 text-center transition-colors ${
+        dragOver ? "border-teal-500 bg-teal-50" : file ? "border-teal-300 bg-teal-50/30" : "border-stone-300 bg-stone-50 hover:border-stone-400"
       }`}
     >
-      <span className="text-sm font-medium text-slate-700">{label}</span>
-      <span className="mt-1 text-xs text-slate-500">{file ? file.name : "arraste o arquivo ou clique"}</span>
+      {file ? (
+        <FileCheck2 size={22} strokeWidth={1.75} className="text-teal-600" />
+      ) : (
+        <FileSpreadsheet size={22} strokeWidth={1.75} className="text-stone-400" />
+      )}
+      <span className="mt-2 text-sm font-medium text-stone-700">{label}</span>
+      <span className="mt-1 text-xs text-stone-500">{file ? file.name : "arraste o arquivo ou clique"}</span>
       <div className="mt-2">{status}</div>
       <input
         type="file"

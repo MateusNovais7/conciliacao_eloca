@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CalendarPlus, Landmark } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { BankAccount, Client, ReconciliationHistoryItem } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -34,44 +35,52 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
 
       {client && (
         <>
-          <h1 className="text-2xl font-semibold tracking-tight">{client.name}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {accounts.length} conta{accounts.length !== 1 ? "s" : ""} bancária{accounts.length !== 1 ? "s" : ""}
-          </p>
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
+              <Landmark size={20} strokeWidth={2} />
+            </span>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-stone-900">{client.name}</h1>
+              <p className="text-sm text-stone-500">
+                {accounts.length} conta{accounts.length !== 1 ? "s" : ""} bancária{accounts.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
 
-          <div className="mt-8 space-y-8">
+          <div className="mt-8 space-y-6">
             {accounts.map((account, idx) => {
               const history = histories[idx];
               return (
-                <section key={account.id} className="rounded-xl border border-slate-200 bg-white">
-                  <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                <section key={account.id} className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+                  <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50/60 px-5 py-4">
                     <div>
-                      <p className="font-medium">{account.bank} · {account.account_number}</p>
-                      {account.agency && <p className="text-xs text-slate-500">Agência {account.agency}</p>}
+                      <p className="font-medium text-stone-900">{account.bank} · {account.account_number}</p>
+                      {account.agency && <p className="text-xs text-stone-500">Agência {account.agency}</p>}
                     </div>
                     <Link
                       href={`/nova-conciliacao?client_id=${client!.id}&bank_account_id=${account.id}`}
-                      className="text-sm font-medium text-teal-700 hover:underline"
+                      className="flex items-center gap-1.5 text-sm font-medium text-teal-700 hover:underline"
                     >
-                      + Nova competência
+                      <CalendarPlus size={15} strokeWidth={2.25} />
+                      Nova competência
                     </Link>
                   </div>
 
                   {history.length === 0 ? (
-                    <p className="px-5 py-6 text-sm text-slate-400">Nenhuma conciliação importada ainda para esta conta.</p>
+                    <p className="px-5 py-6 text-sm text-stone-400">Nenhuma conciliação importada ainda para esta conta.</p>
                   ) : (
-                    <ul className="divide-y divide-slate-100">
+                    <ul className="divide-y divide-stone-100">
                       {history.map((h) => (
                         <li key={h.id}>
                           <Link
                             href={`/conciliacoes/${h.id}`}
-                            className="flex items-center justify-between px-5 py-3 transition-colors hover:bg-slate-50"
+                            className="flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-stone-50"
                           >
-                            <span className="text-sm font-medium">
+                            <span className="text-sm font-medium text-stone-800">
                               {MONTHS_ABBR[h.competencia_month - 1]}/{h.competencia_year}
                             </span>
                             <div className="flex items-center gap-3">
-                              <span className="text-sm tabular-nums text-slate-600">{h.reconciled_pct.toFixed(1)}%</span>
+                              <span className="text-sm tabular-nums text-stone-600">{h.reconciled_pct.toFixed(1)}%</span>
                               <StatusBadge status={h.status} />
                             </div>
                           </Link>
@@ -84,8 +93,8 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
             })}
 
             {accounts.length === 0 && (
-              <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center">
-                <p className="text-slate-600">Nenhuma conta cadastrada para este cliente ainda.</p>
+              <div className="rounded-2xl border border-dashed border-stone-300 px-6 py-10 text-center">
+                <p className="text-stone-600">Nenhuma conta cadastrada para este cliente ainda.</p>
                 <Link
                   href={`/nova-conciliacao?client_id=${client.id}`}
                   className="mt-2 inline-block text-sm font-medium text-teal-700 hover:underline"

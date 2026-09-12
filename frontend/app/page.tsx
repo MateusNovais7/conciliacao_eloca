@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Building2, ChevronRight, Inbox } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Client } from "@/types/api";
 
@@ -14,8 +15,8 @@ export default async function HomePage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <header className="mb-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold tracking-tight text-stone-900">Clientes</h1>
+        <p className="mt-1 text-sm text-stone-500">
           Escolha um cliente para ver o histórico de conciliações, ou importe uma nova.
         </p>
       </header>
@@ -27,8 +28,9 @@ export default async function HomePage() {
       )}
 
       {!error && clients.length === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center">
-          <p className="text-slate-600">Nenhum cliente cadastrado ainda.</p>
+        <div className="flex flex-col items-center rounded-2xl border border-dashed border-stone-300 px-6 py-14 text-center">
+          <Inbox size={28} strokeWidth={1.5} className="mb-3 text-stone-300" />
+          <p className="text-stone-600">Nenhum cliente cadastrado ainda.</p>
           <Link href="/nova-conciliacao" className="mt-2 inline-block text-sm font-medium text-teal-700 hover:underline">
             Comece criando a primeira conciliação →
           </Link>
@@ -36,15 +38,18 @@ export default async function HomePage() {
       )}
 
       {!error && clients.length > 0 && (
-        <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <ul className="divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {clients.map((c) => (
             <li key={c.id}>
               <Link
                 href={`/clientes/${c.id}`}
-                className="flex items-center justify-between px-5 py-4 transition-colors hover:bg-slate-50"
+                className="flex items-center gap-3 px-5 py-4 transition-colors hover:bg-stone-50"
               >
-                <span className="font-medium">{c.name}</span>
-                <span className="text-slate-400">→</span>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
+                  <Building2 size={17} strokeWidth={2} />
+                </span>
+                <span className="flex-1 font-medium text-stone-900">{c.name}</span>
+                <ChevronRight size={18} className="text-stone-300" />
               </Link>
             </li>
           ))}

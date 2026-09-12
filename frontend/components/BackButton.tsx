@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export function BackButton({ fallbackHref, label = "Voltar" }: { fallbackHref: string; label?: string }) {
@@ -10,9 +11,10 @@ export function BackButton({ fallbackHref, label = "Voltar" }: { fallbackHref: s
         if (window.history.length > 1) router.back();
         else router.push(fallbackHref);
       }}
-      className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-800"
+      className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-stone-500 transition-colors hover:text-stone-900"
     >
-      ← {label}
+      <ArrowLeft size={15} strokeWidth={2.25} />
+      {label}
     </button>
   );
 }

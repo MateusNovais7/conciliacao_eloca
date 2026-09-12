@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { BackButton } from "@/components/BackButton";
 
@@ -33,23 +34,26 @@ export default async function ConciliacaoDiariaPage({ params }: { params: { id: 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12">
       <BackButton fallbackHref={`/conciliacoes/${params.id}`} />
-      <h1 className="text-2xl font-semibold tracking-tight">Conciliação diária</h1>
-      <p className="mt-1 text-sm text-slate-500">
+      <h1 className="text-2xl font-semibold tracking-tight text-stone-900">Conciliação diária</h1>
+      <p className="mt-1 text-sm text-stone-500">
         Compara o total liquidado no banco com o total baixado no ERP, dia a dia.
       </p>
 
       {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
 
       {firstDivergentDay && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          O banco e o ERP deixaram de fechar em <strong>{formatDate(firstDivergentDay.date)}</strong> — veja abaixo os
-          lançamentos responsáveis por essa diferença.
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle size={16} strokeWidth={2.25} className="mt-0.5 shrink-0" />
+          <span>
+            O banco e o ERP deixaram de fechar em <strong>{formatDate(firstDivergentDay.date)}</strong> — veja abaixo os
+            lançamentos responsáveis por essa diferença.
+          </span>
         </div>
       )}
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-6 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
         <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <thead className="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
             <tr>
               <th className="px-4 py-3 font-medium">Data</th>
               <th className="px-4 py-3 text-right font-medium">Banco</th>
@@ -59,19 +63,20 @@ export default async function ConciliacaoDiariaPage({ params }: { params: { id: 
               <th className="px-4 py-3 font-medium"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-stone-100">
             {rows.map((r) => (
-              <tr key={r.date} className={r.status === "DIVERGENTE" ? "bg-red-50/40" : undefined}>
-                <td className="px-4 py-2.5 font-medium">{formatDate(r.date)}</td>
+              <tr key={r.date} className={r.status === "DIVERGENTE" ? "bg-red-50/40" : "hover:bg-stone-50/60"}>
+                <td className="px-4 py-2.5 font-medium text-stone-800">{formatDate(r.date)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums">{formatBRL(r.bank_total)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums">{formatBRL(r.erp_total)}</td>
-                <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${r.status === "DIVERGENTE" ? "text-red-700" : "text-slate-400"}`}>
+                <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${r.status === "DIVERGENTE" ? "text-red-700" : "text-stone-400"}`}>
                   {formatBRL(r.difference)}
                 </td>
                 <td className="px-4 py-2.5">
-                  <span className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${
+                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium ${
                     r.status === "OK" ? "border-teal-200 bg-teal-50 text-teal-800" : "border-red-200 bg-red-50 text-red-800"
                   }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${r.status === "OK" ? "bg-teal-600" : "bg-red-600"}`} />
                     {r.status}
                   </span>
                 </td>
