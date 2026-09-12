@@ -170,5 +170,8 @@ class RecoveredTitleOut(BaseModel):
     local_nome: str | None
     cliente_id: str | None
     razao_social: str | None
+    data_emissao: date | None
+    representante_id: str | None
+    representante_nome: str | None
     resolved: bool
 

@@ -8,20 +8,23 @@ CORRESPONDÊNCIA' no motor (Regra 13) — o banco confirma que o título foi
 liquidado via carteira de título descontado, mas não existe mais nenhum
 registro correspondente no ERP.
 
-Para recriar o documento, falta saber de qual Local ele deveria ter sido
-lançado e para qual Cliente — informação que não está em nenhum dos
-arquivos de conciliação, mas está no FTP050 (Relação de NF Emitidas),
-cruzando pelo número da NF extraído do 'Seu Número' do banco.
+Para recriar o documento, falta saber de qual Local, para qual Cliente e
+com qual Representante ele deveria ter sido lançado — informação que não
+está em nenhum dos arquivos de conciliação. Duas fontes complementares:
 
-Regra de extração: no Itaú, os últimos 2 dígitos do 'Seu Número' são a
-Sequência da duplicata, e o restante é o número da Nota Fiscal — mesma
-convenção usada em normalization.py para o Fatura/Seq do ERP (ex:
-'3400622' -> NF 34006, Sequência 22).
+  FTP050    (Relação de NF Emitidas) -> Local, Cliente, Data de Emissão
+  FTP021A1  (Pedidos/Notas Fiscais)  -> Representante (e também
+                                         Local/Cliente/Data, usados como
+                                         desempate secundário)
 
-Quando o número da NF aparece mais de uma vez no FTP050 (comum: Locais
-diferentes reaproveitam a numeração), desempata pelo nome do cliente — o
-primeiro nome do pagador do banco precisa aparecer na razão social do
-FTP050. Sem isso, não escolhe nenhum candidato às cegas.
+Cruzamento pelo número da NF extraído do 'Seu Número' do banco: no Itaú,
+os últimos 2 dígitos são a Sequência da duplicata, e o restante é o
+número da Nota Fiscal (ex: '3400622' -> NF 34006, Sequência 22).
+
+Quando o número da NF aparece mais de uma vez numa fonte, desempata pelo
+nome do cliente — o primeiro nome do pagador do banco precisa aparecer na
+razão social daquela fonte. Sem isso, não escolhe nenhum candidato às
+cegas (nem Local/Cliente, nem Representante, separadamente).
 """
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.models.bank_transaction import BankTransaction as BankTransactionRow
 from app.models.nota_fiscal_emitida import NotaFiscalEmitida as NotaFiscalEmitidaRow
+from app.models.pedido_nota_fiscal import PedidoNotaFiscal as PedidoNotaFiscalRow
 from app.models.reconciliation import Reconciliation
 from app.models.reconciliation_match import ReconciliationMatchRow
 
@@ -53,12 +57,32 @@ class RecoveredTitle:
     local_nome: str | None
     cliente_id: str | None
     razao_social: str | None
-    resolved: bool  # False = não achou nenhum candidato no FTP050
+    data_emissao: date | None
+    representante_id: str | None
+    representante_nome: str | None
+    resolved: bool  # False = não achou Local/Cliente em nenhuma fonte
 
 
 def _split_seu_numero(seu_numero: str) -> tuple[str, str]:
     """Últimos 2 dígitos = Sequência, resto = número da NF."""
     return seu_numero[:-2], seu_numero[-2:]
+
+
+def _escolher_por_nome(candidatos: list, payer_name: str | None, razao_attr: str = "razao_social"):
+    """Desempate genérico: exige match do primeiro nome do pagador contra
+    a razão social do candidato. Nunca escolhe às cegas se houver mais de
+    um candidato e nenhum bater o nome."""
+    if len(candidatos) == 1:
+        return candidatos[0]
+    if len(candidatos) > 1 and payer_name:
+        primeiro_nome = payer_name.split()[0]
+        correspondentes = [
+            c for c in candidatos
+            if getattr(c, razao_attr, None) and primeiro_nome.upper() in getattr(c, razao_attr).upper()
+        ]
+        if len(correspondentes) >= 1:
+            return correspondentes[0]
+    return None
 
 
 def find_recoverable_titles(session: Session, reconciliation_id: UUID) -> list[RecoveredTitle]:
@@ -72,8 +96,8 @@ def find_recoverable_titles(session: Session, reconciliation_id: UUID) -> list[R
         .all()
     )
 
-    # FTP050 não é importado por competência específica (pode cobrir anos)
-    # — busca em todo o acervo já importado para esta conta.
+    # Nem FTP050 nem FTP021A1 são importados por competência específica
+    # (podem cobrir anos) — busca em todo o acervo já importado pra conta.
     notas = (
         session.query(NotaFiscalEmitidaRow)
         .filter_by(bank_account_id=reconciliation.bank_account_id)
@@ -83,6 +107,15 @@ def find_recoverable_titles(session: Session, reconciliation_id: UUID) -> list[R
     for n in notas:
         notas_by_nf.setdefault(n.nota_fiscal, []).append(n)
 
+    pedidos = (
+        session.query(PedidoNotaFiscalRow)
+        .filter_by(bank_account_id=reconciliation.bank_account_id)
+        .all()
+    )
+    pedidos_by_nf: dict[str, list[PedidoNotaFiscalRow]] = {}
+    for p in pedidos:
+        pedidos_by_nf.setdefault(p.nota_fiscal, []).append(p)
+
     results: list[RecoveredTitle] = []
     for m in matches:
         bank: BankTransactionRow | None = m.bank_transaction
@@ -90,19 +123,17 @@ def find_recoverable_titles(session: Session, reconciliation_id: UUID) -> list[R
             continue
 
         nf_num, seq = _split_seu_numero(bank.seu_numero)
-        candidatos = notas_by_nf.get(nf_num, [])
 
-        escolhido: NotaFiscalEmitidaRow | None = None
-        if len(candidatos) == 1:
-            escolhido = candidatos[0]
-        elif len(candidatos) > 1 and bank.payer_name:
-            primeiro_nome = bank.payer_name.split()[0]
-            correspondentes = [
-                c for c in candidatos
-                if c.razao_social and primeiro_nome.upper() in c.razao_social.upper()
-            ]
-            if len(correspondentes) >= 1:
-                escolhido = correspondentes[0]
+        nota = _escolher_por_nome(notas_by_nf.get(nf_num, []), bank.payer_name)
+        pedido = _escolher_por_nome(pedidos_by_nf.get(nf_num, []), bank.payer_name)
+
+        # Local/Cliente: prioriza o FTP050 (fonte original pensada pra
+        # isso); usa o FTP021A1 como alternativa se o FTP050 não resolveu.
+        local_id = nota.local_id if nota else None
+        local_nome = nota.local_nome if nota else (pedido.local if pedido else None)
+        cliente_id = nota.cliente_id if nota else (pedido.cliente_id if pedido else None)
+        razao_social = nota.razao_social if nota else (pedido.razao_social if pedido else None)
+        data_emissao = nota.data_emissao if nota else (pedido.data_emissao if pedido else None)
 
         results.append(RecoveredTitle(
             match_id=m.id,
@@ -115,11 +146,14 @@ def find_recoverable_titles(session: Session, reconciliation_id: UUID) -> list[R
             due_date=bank.due_date,
             movement_date=bank.movement_date,
             agency=bank.agency,
-            local_id=escolhido.local_id if escolhido else None,
-            local_nome=escolhido.local_nome if escolhido else None,
-            cliente_id=escolhido.cliente_id if escolhido else None,
-            razao_social=escolhido.razao_social if escolhido else None,
-            resolved=escolhido is not None,
+            local_id=local_id,
+            local_nome=local_nome,
+            cliente_id=cliente_id,
+            razao_social=razao_social,
+            data_emissao=data_emissao,
+            representante_id=pedido.representante_id if pedido else None,
+            representante_nome=pedido.representante_nome if pedido else None,
+            resolved=bool(cliente_id and local_id is not None),
         ))
 
     return results

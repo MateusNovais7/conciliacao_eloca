@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, FileSpreadsheet, Terminal, UploadCloud } from "lucide-react";
+import { AlertCircle, CheckCircle2, ClipboardCopy, FileSpreadsheet, UploadCloud } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Reconciliation, RecoveredTitle } from "@/types/api";
 import { BackButton } from "@/components/BackButton";
@@ -17,7 +17,7 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
   const [titulos, setTitulos] = useState<RecoveredTitle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<"ftp050" | "ftp021a1" | null>(null);
   const [importedBy, setImportedBy] = useState("");
 
   async function carregar() {
@@ -40,13 +40,13 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
-  async function handleUploadFtp050(file: File) {
+  async function handleUpload(kind: "ftp050" | "ftp021a1", file: File) {
     if (!reconciliation) return;
     if (!importedBy.trim()) {
       setError("Informe seu e-mail ou usuário antes de subir o arquivo.");
       return;
     }
-    setUploading(true);
+    setUploading(kind);
     setError(null);
     try {
       const form = new FormData();
@@ -55,30 +55,30 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
       form.append("competencia_month", String(reconciliation.competencia_month));
       form.append("imported_by", importedBy);
       form.append("file", file);
-      await api.postForm("/importacoes/ftp050", form);
+      await api.postForm(`/importacoes/${kind}`, form);
       await carregar();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Não foi possível importar o FTP050.");
+      setError(e instanceof ApiError ? e.message : `Não foi possível importar o ${kind}.`);
     } finally {
-      setUploading(false);
+      setUploading(null);
     }
   }
 
   const resolvidos = titulos.filter((t) => t.resolved).length;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <BackButton fallbackHref={`/conciliacoes/${params.id}`} />
       <h1 className="text-2xl font-semibold tracking-tight text-stone-900">Recuperação de documentos apagados</h1>
       <p className="mt-1 text-sm text-stone-500">
-        Cruza os títulos "sem correspondência" com o FTP050 (Relação de NF Emitidas) para descobrir
-        Local e Cliente e permitir reimputar o documento no ERP.
+        Cruza os títulos "sem correspondência" com o FTP050 (Local/Cliente) e o FTP021A1 (Representante)
+        para permitir reimputar o documento no ERP.
       </p>
 
       {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
 
       <section className="mt-6 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold text-stone-700">Enviar FTP050</h2>
+        <h2 className="text-sm font-semibold text-stone-700">Enviar relatórios</h2>
         <p className="mt-1 text-xs text-stone-500">
           O ERP limita a exportação a 6 meses por consulta — pode enviar quantos arquivos precisar, um de cada vez;
           eles se somam ao acervo sem duplicar.
@@ -92,13 +92,24 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
           />
           <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-2 text-sm text-stone-600 hover:border-teal-400">
             <UploadCloud size={16} strokeWidth={2.25} />
-            {uploading ? "Enviando…" : "Escolher arquivo FTP050"}
+            {uploading === "ftp050" ? "Enviando…" : "FTP050 (NF Emitidas)"}
             <input
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
-              disabled={uploading}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadFtp050(f); }}
+              disabled={uploading !== null}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload("ftp050", f); }}
+            />
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-2 text-sm text-stone-600 hover:border-teal-400">
+            <UploadCloud size={16} strokeWidth={2.25} />
+            {uploading === "ftp021a1" ? "Enviando…" : "FTP021A1 (Pedidos/NF)"}
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              disabled={uploading !== null}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload("ftp021a1", f); }}
             />
           </label>
         </div>
@@ -112,24 +123,14 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
               {titulos.length} <span className="text-base font-normal text-stone-400">({resolvidos} resolvidos)</span>
             </p>
           </div>
-          <div className="flex gap-2">
-            <DownloadButton
-              path={`/conciliacoes/${params.id}/recuperacao/excel`}
-              filename={`reimputacao_${reconciliation?.competencia_year}_${String(reconciliation?.competencia_month).padStart(2, "0")}.xlsx`}
-              className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-            >
-              <FileSpreadsheet size={15} strokeWidth={2.25} />
-              Baixar planilha
-            </DownloadButton>
-            <DownloadButton
-              path={`/conciliacoes/${params.id}/recuperacao/script`}
-              filename="reimputacao.js"
-              className="flex items-center gap-1.5 rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
-            >
-              <Terminal size={15} strokeWidth={2.25} />
-              Baixar script de console
-            </DownloadButton>
-          </div>
+          <DownloadButton
+            path={`/conciliacoes/${params.id}/recuperacao/excel`}
+            filename={`reimputacao_${reconciliation?.competencia_year}_${String(reconciliation?.competencia_month).padStart(2, "0")}.xlsx`}
+            className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+          >
+            <FileSpreadsheet size={15} strokeWidth={2.25} />
+            Baixar planilha
+          </DownloadButton>
         </div>
       )}
 
@@ -146,8 +147,10 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
                 <th className="px-4 py-3 font-medium">Pagador (banco)</th>
                 <th className="px-4 py-3 text-right font-medium">Valor</th>
                 <th className="px-4 py-3 font-medium">Local</th>
-                <th className="px-4 py-3 font-medium">Cliente (FTP050)</th>
+                <th className="px-4 py-3 font-medium">Cliente</th>
+                <th className="px-4 py-3 font-medium">Representante</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
@@ -158,6 +161,7 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
                   <td className="px-4 py-2.5 text-right tabular-nums">{formatBRL(t.principal_amount)}</td>
                   <td className="px-4 py-2.5">{t.resolved ? `${t.local_nome} [${t.local_id}]` : "—"}</td>
                   <td className="px-4 py-2.5 text-stone-700">{t.resolved ? `${t.razao_social} (${t.cliente_id})` : "—"}</td>
+                  <td className="px-4 py-2.5 text-stone-700">{t.representante_nome ? `${t.representante_nome} (${t.representante_id})` : "—"}</td>
                   <td className="px-4 py-2.5">
                     {t.resolved ? (
                       <span className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-800">
@@ -169,6 +173,9 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-2.5">
+                    <CriarConsoleButton reconciliationId={params.id} matchId={t.match_id} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -176,5 +183,34 @@ export default function RecuperacaoPage({ params }: { params: { id: string } }) 
         </div>
       )}
     </main>
+  );
+}
+
+function CriarConsoleButton({ reconciliationId, matchId }: { reconciliationId: string; matchId: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "copiado" | "erro">("idle");
+
+  async function handleClick() {
+    setState("loading");
+    try {
+      const script = await api.getText(`/conciliacoes/${reconciliationId}/recuperacao/${matchId}/script`);
+      await navigator.clipboard.writeText(script);
+      setState("copiado");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("erro");
+      setTimeout(() => setState("idle"), 2000);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={state === "loading"}
+      title="Copiar script de console (F12) para este documento"
+      className="flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+    >
+      <ClipboardCopy size={13} strokeWidth={2.25} />
+      {state === "copiado" ? "Copiado!" : state === "erro" ? "Erro" : "Criar Console"}
+    </button>
   );
 }

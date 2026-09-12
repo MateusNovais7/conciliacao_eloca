@@ -375,7 +375,8 @@ def _recovered_to_row(r: RecoveredTitle) -> dict:
         "Sequência": r.sequencia,
         "Status": "Cobrança Ativa",
         "Cliente": r.cliente_id if r.resolved else None,
-        "Data Emissão": None,  # preenchido no export a partir do FTP050 (ver nota)
+        "Representante": r.representante_id,
+        "Data Emissão": r.data_emissao.strftime("%d/%m/%Y") if r.data_emissao else None,
         "Vencimento": r.due_date.strftime("%d/%m/%Y") if r.due_date else None,
         "Valor de Emissão": r.principal_amount,
         "Banco": 341,
@@ -385,7 +386,8 @@ def _recovered_to_row(r: RecoveredTitle) -> dict:
         "Número do Título": r.nosso_numero,
         "_Seu Número (banco)": r.seu_numero,
         "_Pagador (banco)": r.payer_name,
-        "_Razão Social (FTP050)": r.razao_social,
+        "_Razão Social": r.razao_social,
+        "_Representante (nome)": r.representante_nome,
         "_Local (nome)": r.local_nome,
         "_Data liquidação banco": r.movement_date.strftime("%d/%m/%Y"),
         "_Resolvido": "SIM" if r.resolved else "NÃO — revisar manualmente",
@@ -406,13 +408,13 @@ def exportar_recuperacao_excel(
     titulos = find_recoverable_titles(session, reconciliation_id)
 
     FORM_COLS = [
-        "Local", "Duplicata", "Sequência", "Status", "Cliente", "Data Emissão",
-        "Vencimento", "Valor de Emissão", "Banco", "Agência", "Tipo Documento",
-        "Forma Pagamento NF-e 4.0", "Número do Título",
+        "Local", "Duplicata", "Sequência", "Status", "Cliente", "Representante",
+        "Data Emissão", "Vencimento", "Valor de Emissão", "Banco", "Agência",
+        "Tipo Documento", "Forma Pagamento NF-e 4.0", "Número do Título",
     ]
     REF_COLS = [
-        "_Seu Número (banco)", "_Pagador (banco)", "_Razão Social (FTP050)",
-        "_Local (nome)", "_Data liquidação banco", "_Resolvido",
+        "_Seu Número (banco)", "_Pagador (banco)", "_Razão Social",
+        "_Representante (nome)", "_Local (nome)", "_Data liquidação banco", "_Resolvido",
     ]
     ALL_COLS = FORM_COLS + REF_COLS
 
@@ -457,11 +459,11 @@ def exportar_recuperacao_excel(
 
     widths = {
         "Local": 8, "Duplicata": 11, "Sequência": 10, "Status": 15, "Cliente": 9,
-        "Data Emissão": 13, "Vencimento": 12, "Valor de Emissão": 15, "Banco": 8,
-        "Agência": 9, "Tipo Documento": 20, "Forma Pagamento NF-e 4.0": 22,
+        "Representante": 12, "Data Emissão": 13, "Vencimento": 12, "Valor de Emissão": 15,
+        "Banco": 8, "Agência": 9, "Tipo Documento": 20, "Forma Pagamento NF-e 4.0": 22,
         "Número do Título": 15, "_Seu Número (banco)": 16, "_Pagador (banco)": 30,
-        "_Razão Social (FTP050)": 45, "_Local (nome)": 16, "_Data liquidação banco": 16,
-        "_Resolvido": 22,
+        "_Razão Social": 45, "_Representante (nome)": 30, "_Local (nome)": 16,
+        "_Data liquidação banco": 16, "_Resolvido": 22,
     }
     for col_idx, col_name in enumerate(ALL_COLS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_name, 14)
@@ -475,9 +477,10 @@ def exportar_recuperacao_excel(
         "",
         "Colunas VERDES: campos exatos do formulário do ERP (CRP015A1).",
         "Colunas CINZAS: dados de referência/auditoria — não fazem parte do formulário.",
-        "'Local'/'Cliente' vazios e '_Resolvido' = NÃO: a NF não foi encontrada com confiança no FTP050 — revisar manualmente antes de importar.",
+        "'Local'/'Cliente' vazios e '_Resolvido' = NÃO: a NF não foi encontrada com confiança no FTP050/FTP021A1 — revisar manualmente antes de importar.",
         "Valor de Emissão vem de 'Valor Inicial (R$)' da Francesinha (ver comentário na célula do cabeçalho).",
-        "Data Emissão não veio automaticamente neste export — consultar o FTP050 pelo número da NF (coluna Duplicata) e preencher manualmente.",
+        "Data Emissão vem do FTP050 (ou do FTP021A1 quando o FTP050 não resolveu).",
+        "Representante vem do FTP021A1 — pode ficar vazio mesmo quando Local/Cliente foram resolvidos, se esse arquivo não tiver sido importado.",
     ]
     for i, nota in enumerate(notas, start=2):
         legend.cell(row=i, column=1, value=nota).font = Font(name="Arial", size=10)
@@ -494,99 +497,1054 @@ def exportar_recuperacao_excel(
     )
 
 
-@router.get("/{reconciliation_id}/recuperacao/script", response_class=PlainTextResponse)
-def exportar_recuperacao_script(
-    reconciliation_id: UUID, session: Session = Depends(get_session), _=Depends(require_api_key),
+@router.get("/{reconciliation_id}/recuperacao/{match_id}/script", response_class=PlainTextResponse)
+def gerar_script_console_por_titulo(
+    reconciliation_id: UUID, match_id: UUID,
+    session: Session = Depends(get_session), _=Depends(require_api_key),
 ):
-    """Gera um script para colar no console (F12) da tela de cadastro do
-    título (CRP015A1). IMPORTANTE — limite real e assumido: só os campos
-    de texto simples (Duplicata, Sequência, Cliente, Datas, Valor, Título)
-    são preenchidos automaticamente via o atributo 'name' de cada input,
-    que é confiável. Os 4 campos de busca (Local, Status, Tipo Documento,
-    Forma Pagamento) são um widget customizado sem um seletor confiável
-    visível a partir do HTML fornecido — o script digita o valor na caixa
-    de busca para disparar a busca automática do próprio ERP, mas não
-    tenta selecionar a sugestão sozinho. Precisa confirmar manualmente."""
-    _get_reconciliation_or_404(session, reconciliation_id)
+    """Gera o script de console (F12) para UM único documento, usando o
+    template fornecido (com seletores reais validados pelo cliente para
+    os campos de busca customizados — Local, Status, Tipo Documento,
+    Forma Pagamento). Um botão 'Criar Console' por linha, não um arquivo
+    combinado — o usuário copia, cola no console com o formulário de
+    NOVO documento aberto, confere e salva, um de cada vez."""
+    reconciliation = _get_reconciliation_or_404(session, reconciliation_id)
     titulos = find_recoverable_titles(session, reconciliation_id)
-    reconciliation = session.get(Reconciliation, reconciliation_id)
+    titulo = next((t for t in titulos if t.match_id == match_id), None)
+    if titulo is None:
+        raise HTTPException(status_code=404, detail="Título não encontrado na recuperação desta conciliação.")
+
     account_number = reconciliation.bank_account.account_number if reconciliation.bank_account else ""
+    local_display = f"{titulo.local_nome} [{titulo.local_id}]" if titulo.local_nome and titulo.local_id is not None else ""
 
     import json
-    payload = [
-        {
-            "nf": t.nota_fiscal, "seq": t.sequencia,
-            "cliente": t.cliente_id, "clienteNome": t.razao_social,
-            "vencimento": t.due_date.strftime("%d/%m/%Y") if t.due_date else "",
-            "valor": t.principal_amount, "agencia": t.agency,
-            "numeroTitulo": t.nosso_numero,
-            "localId": t.local_id, "localNome": t.local_nome,
-            "resolvido": t.resolved,
-            "seuNumero": t.seu_numero,
-        }
-        for t in titulos
-    ]
+    dados = {
+        "seuNumero": titulo.seu_numero,
+        "local": local_display,
+        "status": "Cobrança Ativa",
+        "cliente": titulo.cliente_id or "",
+        "representante": titulo.representante_id or "",
+        "dataEmissao": titulo.data_emissao.strftime("%d/%m/%Y") if titulo.data_emissao else "",
+        "vencimento": titulo.due_date.strftime("%d/%m/%Y") if titulo.due_date else "",
+        "valorEmissao": f"{titulo.principal_amount:.2f}".replace(".", ",") if titulo.principal_amount is not None else "",
+        "banco": "341",
+        "agencia": titulo.agency or "",
+        "contaCorrente": account_number,
+        "tipoDocumento": "5",
+        "formaPagamento": "15",
+        "numeroTitulo": titulo.nosso_numero,
+    }
+    dados_js = json.dumps(dados, ensure_ascii=False, indent=8)
 
-    script = f"""// Script gerado pelo Sistema de Conciliação — reimputação de documentos apagados.
-// Cole no console (F12) da tela do CRP015A1, com o formulário de NOVO documento aberto.
-//
-// LIMITE CONHECIDO: preenche com segurança os campos de texto simples (Duplicata,
-// Sequência, Cliente, Vencimento, Valor de Emissão, Agência, Número do Título).
-// Local, Status, Tipo Documento e Forma Pagamento são campos de busca customizados —
-// o script digita o valor pra disparar a busca automática do ERP, mas você precisa
-// confirmar/selecionar a sugestão certa manualmente (não seleciona sozinho).
-//
-// Uso: rode window.reimputacao.preencher() para o documento atual, depois de
-// SALVAR no ERP rode window.reimputacao.proximo() e preencher() de novo.
+    if not titulo.resolved:
+        aviso = (
+            "// ATENÇÃO: este documento NÃO foi resolvido com confiança (Local/Cliente\n"
+            "// não encontrados no FTP050/FTP021A1) — confira 'local' e 'cliente' abaixo\n"
+            "// antes de rodar, provavelmente estão vazios.\n"
+        )
+    else:
+        aviso = ""
 
-window.reimputacao = (function () {{
-  const documentos = {json.dumps(payload, ensure_ascii=False, indent=2)};
-  let indice = 0;
+    script = f"""// Script gerado pelo Sistema de Conciliação — reimputação de documento apagado.
+// Título {titulo.seu_numero} (NF {titulo.nota_fiscal}/{titulo.sequencia}) — {titulo.razao_social or titulo.payer_name or "cliente não identificado"}
+// Cole no console (F12) com o formulário de NOVO documento aberto no CRP015A1.
+{aviso}(async function () {{
 
-  function disparar(el, tipo) {{
-    el.dispatchEvent(new Event(tipo, {{ bubbles: true }}));
-  }}
+    // ============================================================
+    // DADOS PARA TESTE
+    // ============================================================
 
-  function setCampo(name, valor) {{
-    const el = document.querySelector(`[name="${{name}}"]`);
-    if (!el) {{ console.warn(`Campo ${{name}} não encontrado na tela atual.`); return; }}
-    el.value = valor ?? "";
-    disparar(el, "input");
-    disparar(el, "keyup");
-    disparar(el, "change");
-  }}
+    const DADOS = {dados_js};
 
-  function preencher() {{
-    const doc = documentos[indice];
-    if (!doc) {{ console.log("Não há mais documentos."); return; }}
-    console.log(`Preenchendo ${{indice + 1}}/${{documentos.length}} — NF ${{doc.nf}}-${{doc.seq}} (${{doc.clienteNome ?? "cliente não resolvido"}})`);
-    if (!doc.resolvido) {{
-      console.warn("Este documento NÃO foi resolvido com confiança (Local/Cliente ausentes) — preencha manualmente.");
+
+    // ============================================================
+    // CONFIGURAÇÃO DE VELOCIDADE
+    // ============================================================
+
+    const TEMPO = {{
+        campo: 120,
+        dropdownAbrir: 180,
+        dropdownSelecionar: 180,
+        estabilizar: 250,
+
+        // Apenas Sequência precisa de um pouco mais,
+        // pois sabemos que dispara find('CODCLIENTE')
+        cargaSequencia: 800,
+
+        // Quanto tempo observar rapidamente se um modal apareceu
+        janelaModal: 700
+    }};
+
+
+    // ============================================================
+    // UTILITÁRIOS
+    // ============================================================
+
+    const esperar = ms =>
+        new Promise(resolve => setTimeout(resolve, ms));
+
+
+    function getAllDocs() {{
+
+        const docs = [document];
+
+        function buscar(doc) {{
+
+            doc.querySelectorAll('iframe').forEach(iframe => {{
+
+                try {{
+
+                    const d =
+                        iframe.contentDocument ||
+                        iframe.contentWindow.document;
+
+                    if (d && !docs.includes(d)) {{
+
+                        docs.push(d);
+                        buscar(d);
+
+                    }}
+
+                }} catch (e) {{}}
+
+            }});
+
+        }}
+
+        buscar(document);
+
+        return docs;
     }}
-    setCampo("NUMFATURA", doc.nf);
-    setCampo("NUMSEQUENCIA", doc.seq);
-    setCampo("CODCLIENTE", doc.cliente);
-    setCampo("DATAVENCTO", doc.vencimento);
-    setCampo("VALOREMISSAO", doc.valor != null ? String(doc.valor).replace(".", ",") : "");
-    setCampo("CONTACORRENTE", "{account_number}");
-    setCampo("NUMTITULO", doc.numeroTitulo);
 
-    console.log(`Local esperado: ${{doc.localNome ?? "?"}} [${{doc.localId ?? "?"}}] — selecione manualmente no campo Local.`);
-    console.log("Confirme também Status = Cobrança Ativa, Tipo Documento = BOLETO BANCARIO [5], Forma Pagamento = Boleto Bancário-[15].");
-  }}
 
-  function proximo() {{
-    indice += 1;
-    if (indice >= documentos.length) {{ console.log("Fim da lista."); return; }}
-    preencher();
-  }}
+    function localizar(name) {{
 
-  function atual() {{ return documentos[indice]; }}
+        for (const doc of getAllDocs()) {{
 
-  return {{ documentos, preencher, proximo, atual, total: documentos.length }};
+            const campo =
+                doc.querySelector(`[name="${{name}}"]`);
+
+            if (campo) {{
+                return campo;
+            }}
+
+        }}
+
+        return null;
+    }}
+
+
+    // ============================================================
+    // MODAL ATENÇÃO
+    // ============================================================
+
+    function localizarModalAtencao() {{
+
+        for (const doc of getAllDocs()) {{
+
+            const modal =
+                doc.querySelector(
+                    '#DHTMLSuite_modalBox_contentDiv'
+                );
+
+            if (!modal) {{
+                continue;
+            }}
+
+
+            const style =
+                doc.defaultView?.getComputedStyle(modal);
+
+
+            const visivel =
+                style &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden';
+
+
+            if (visivel) {{
+
+                return {{
+                    modal,
+                    doc
+                }};
+
+            }}
+
+        }}
+
+        return null;
+    }}
+
+
+    // ============================================================
+    // FECHAR MODAL IMEDIATAMENTE
+    // ============================================================
+
+    async function fecharModalAgora() {{
+
+        const resultado =
+            localizarModalAtencao();
+
+
+        if (!resultado) {{
+            return false;
+        }}
+
+
+        const {{
+            modal,
+            doc
+        }} = resultado;
+
+
+        const texto =
+            (modal.innerText || '')
+                .replace(/\\s+/g, ' ')
+                .trim();
+
+
+        console.warn(
+            `⚠️ ERP: ${{texto}}`
+        );
+
+
+        const botao =
+            modal.querySelector(
+                'a[onclick*="closeMessage"]'
+            );
+
+
+        if (botao) {{
+
+            botao.click();
+
+        }} else {{
+
+            try {{
+
+                if (
+                    typeof doc.defaultView.closeMessage ===
+                    'function'
+                ) {{
+
+                    doc.defaultView.closeMessage();
+
+                }}
+
+            }} catch (e) {{}}
+
+        }}
+
+
+        console.log(
+            '✅ Aviso fechado automaticamente.'
+        );
+
+
+        await esperar(100);
+
+        return true;
+    }}
+
+
+    // ============================================================
+    // OBSERVAR RAPIDAMENTE SE MODAL APARECE
+    // ============================================================
+
+    async function observarModal(
+        tempo = TEMPO.janelaModal
+    ) {{
+
+        const inicio =
+            Date.now();
+
+
+        while (
+            Date.now() - inicio < tempo
+        ) {{
+
+            if (localizarModalAtencao()) {{
+
+                await fecharModalAgora();
+
+                // Continua observando por pouco tempo,
+                // caso outro modal apareça.
+
+                await esperar(80);
+
+            }} else {{
+
+                await esperar(50);
+
+            }}
+
+        }}
+
+    }}
+
+
+    // ============================================================
+    // PREENCHER INPUT
+    // ============================================================
+
+    async function preencher(
+        name,
+        valor,
+        readonly = false
+    ) {{
+
+        // Fecha algum modal que já esteja aberto.
+        await fecharModalAgora();
+
+
+        const campo =
+            localizar(name);
+
+
+        if (!campo) {{
+
+            console.error(
+                `❌ Campo não encontrado: ${{name}}`
+            );
+
+            return false;
+        }}
+
+
+        const tinhaReadonly =
+            campo.hasAttribute('readonly');
+
+
+        if (
+            readonly &&
+            tinhaReadonly
+        ) {{
+
+            campo.removeAttribute('readonly');
+
+        }}
+
+
+        campo.focus();
+
+        campo.value =
+            valor;
+
+
+        campo.dispatchEvent(
+            new Event(
+                'input',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        campo.dispatchEvent(
+            new Event(
+                'change',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        campo.dispatchEvent(
+            new Event(
+                'blur',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        if (
+            readonly &&
+            tinhaReadonly
+        ) {{
+
+            campo.setAttribute(
+                'readonly',
+                ''
+            );
+
+        }}
+
+
+        console.log(
+            `✅ ${{name}}: ${{valor}}`
+        );
+
+
+        await esperar(
+            TEMPO.campo
+        );
+
+
+        // Caso o onchange tenha criado modal,
+        // fecha imediatamente se ele já apareceu.
+        await fecharModalAgora();
+
+
+        return true;
+    }}
+
+
+    // ============================================================
+    // VALOR MONETÁRIO
+    // ============================================================
+
+    async function preencherValorMonetario(
+        name,
+        valor
+    ) {{
+
+        await fecharModalAgora();
+
+
+        const campo =
+            localizar(name);
+
+
+        if (!campo) {{
+
+            console.error(
+                `❌ Campo não encontrado: ${{name}}`
+            );
+
+            return false;
+        }}
+
+
+        const valorInterno =
+            String(valor)
+                .replace(/\\./g, '')
+                .replace(',', '.');
+
+
+        campo.focus();
+
+        campo.value =
+            valorInterno;
+
+
+        campo.dispatchEvent(
+            new Event(
+                'input',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        campo.dispatchEvent(
+            new Event(
+                'change',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        campo.dispatchEvent(
+            new Event(
+                'blur',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        await esperar(
+            TEMPO.campo
+        );
+
+
+        console.log(
+            `✅ ${{name}}: ${{valor}} | ERP: ${{campo.value}}`
+        );
+
+
+        await fecharModalAgora();
+
+        return true;
+    }}
+
+
+    // ============================================================
+    // NORMALIZAR TEXTO
+    // ============================================================
+
+    function normalizar(texto) {{
+
+        return String(texto || '')
+            .replace(/\\s+/g, ' ')
+            .replace(':', '')
+            .trim()
+            .toLowerCase();
+
+    }}
+
+
+    // ============================================================
+    // LOCALIZAR DROPDOWN
+    // ============================================================
+
+    function localizarDropdown(
+        rotulo
+    ) {{
+
+        const alvo =
+            normalizar(rotulo);
+
+
+        for (const doc of getAllDocs()) {{
+
+            const elementos = [
+                ...doc.querySelectorAll(
+                    'label, div, span, td, th'
+                )
+            ];
+
+
+            for (const elemento of elementos) {{
+
+                const texto =
+                    normalizar(
+                        elemento.textContent
+                    );
+
+
+                if (
+                    texto !== alvo &&
+                    !texto.startsWith(alvo)
+                ) {{
+
+                    continue;
+
+                }}
+
+
+                let atual =
+                    elemento;
+
+
+                for (
+                    let nivel = 0;
+                    nivel < 6 && atual;
+                    nivel++
+                ) {{
+
+                    const input =
+                        atual.querySelector?.(
+                            'input.search[autocomplete="off"][tabindex="0"]'
+                        );
+
+
+                    if (input) {{
+
+                        return input;
+
+                    }}
+
+
+                    atual =
+                        atual.parentElement;
+
+                }}
+
+            }}
+
+        }}
+
+
+        return null;
+    }}
+
+
+    // ============================================================
+    // ABRIR DROPDOWN
+    // ============================================================
+
+    async function abrirDropdown(
+        input
+    ) {{
+
+        await fecharModalAgora();
+
+
+        input.focus();
+
+
+        input.dispatchEvent(
+            new MouseEvent(
+                'mousedown',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        input.click();
+
+
+        input.dispatchEvent(
+            new MouseEvent(
+                'mouseup',
+                {{ bubbles: true }}
+            )
+        );
+
+
+        await esperar(
+            TEMPO.dropdownAbrir
+        );
+
+    }}
+
+
+    // ============================================================
+    // DROPDOWN POR TEXTO
+    // ============================================================
+
+    async function selecionarPorTexto(
+        rotulo,
+        textoDesejado
+    ) {{
+
+        const input =
+            localizarDropdown(rotulo);
+
+
+        if (!input) {{
+
+            console.error(
+                `❌ Dropdown não encontrado: ${{rotulo}}`
+            );
+
+            return false;
+        }}
+
+
+        await abrirDropdown(input);
+
+
+        const desejado =
+            normalizar(textoDesejado);
+
+
+        for (const doc of getAllDocs()) {{
+
+            const itens = [
+                ...doc.querySelectorAll(
+                    'div.item'
+                )
+            ];
+
+
+            const item =
+                itens.find(el =>
+
+                    el.offsetParent !== null &&
+
+                    normalizar(
+                        el.textContent
+                    ) === desejado
+
+                );
+
+
+            if (item) {{
+
+                item.click();
+
+
+                console.log(
+                    `✅ ${{rotulo}}: ${{textoDesejado}}`
+                );
+
+
+                await esperar(
+                    TEMPO.dropdownSelecionar
+                );
+
+
+                await fecharModalAgora();
+
+                return true;
+            }}
+
+        }}
+
+
+        console.error(
+            `❌ Opção não encontrada: ${{textoDesejado}}`
+        );
+
+
+        return false;
+    }}
+
+
+    // ============================================================
+    // DROPDOWN POR DATA-VALUE
+    // ============================================================
+
+    async function selecionarPorValor(
+        rotulo,
+        valor
+    ) {{
+
+        const input =
+            localizarDropdown(rotulo);
+
+
+        if (!input) {{
+
+            console.error(
+                `❌ Dropdown não encontrado: ${{rotulo}}`
+            );
+
+            return false;
+        }}
+
+
+        await abrirDropdown(input);
+
+
+        for (const doc of getAllDocs()) {{
+
+            const itens = [
+                ...doc.querySelectorAll(
+                    'div.item[data-value]'
+                )
+            ];
+
+
+            const item =
+                itens.find(el =>
+
+                    el.offsetParent !== null &&
+
+                    el.getAttribute(
+                        'data-value'
+                    ) === String(valor)
+
+                );
+
+
+            if (item) {{
+
+                const descricao =
+                    (item.textContent || '')
+                        .trim();
+
+
+                item.click();
+
+
+                console.log(
+                    `✅ ${{rotulo}}: ${{descricao}}`
+                );
+
+
+                await esperar(
+                    TEMPO.dropdownSelecionar
+                );
+
+
+                await fecharModalAgora();
+
+                return true;
+            }}
+
+        }}
+
+
+        console.error(
+            `❌ ${{rotulo}}: valor ${{valor}} não encontrado`
+        );
+
+
+        return false;
+    }}
+
+
+    // ============================================================
+    // INÍCIO
+    // ============================================================
+
+    console.log(
+        '🚀 INICIANDO PREENCHIMENTO RÁPIDO'
+    );
+
+
+    // ============================================================
+    // CALCULAR DUPLICATA / SEQUÊNCIA
+    // ============================================================
+
+    const numero =
+        DADOS.seuNumero
+            .replace(/\\D/g, '');
+
+
+    const duplicata =
+        numero.slice(0, -2);
+
+
+    const sequencia =
+        numero.slice(-2);
+
+
+    console.log(
+        `ℹ️ ${{numero}} → Duplicata ${{duplicata}} / Seq ${{sequencia}}`
+    );
+
+
+    // ============================================================
+    // 1. DUPLICATA
+    // ============================================================
+
+    await preencher(
+        'NUMFATURA',
+        duplicata
+    );
+
+
+    // ============================================================
+    // 2. SEQUÊNCIA
+    // ============================================================
+
+    await preencher(
+        'NUMSEQUENCIA',
+        sequencia
+    );
+
+
+    // Sequência dispara find('CODCLIENTE').
+    // Mantemos apenas esta pequena espera.
+
+    await esperar(
+        TEMPO.cargaSequencia
+    );
+
+
+    await fecharModalAgora();
+
+
+    // ============================================================
+    // 3. LOCAL
+    // ============================================================
+
+    await selecionarPorTexto(
+        'Local',
+        DADOS.local
+    );
+
+
+    // ============================================================
+    // 4. STATUS
+    // ============================================================
+
+    await selecionarPorTexto(
+        'Status',
+        DADOS.status
+    );
+
+
+    // ============================================================
+    // 5. CLIENTE
+    // ============================================================
+
+    await preencher(
+        'CODCLIENTE',
+        DADOS.cliente
+    );
+
+
+    // Observa brevemente o lookup sem pausa longa.
+    await observarModal(600);
+
+
+    // ============================================================
+    // 6. REPRESENTANTE
+    // ============================================================
+
+    await preencher(
+        'REPRESENTANTE',
+        DADOS.representante
+    );
+
+
+    await observarModal(500);
+
+
+    // ============================================================
+    // 7. DATA EMISSÃO
+    // ============================================================
+
+    await preencher(
+        'DATAEMISSAO',
+        DADOS.dataEmissao
+    );
+
+
+    // ============================================================
+    // 8. VENCIMENTO
+    // ============================================================
+
+    await preencher(
+        'DATAVENCTO',
+        DADOS.vencimento
+    );
+
+
+    await esperar(200);
+
+    await fecharModalAgora();
+
+
+    // ============================================================
+    // 9. VALOR EMISSÃO
+    // ============================================================
+
+    await preencherValorMonetario(
+        'VALOREMISSAO',
+        DADOS.valorEmissao
+    );
+
+
+    // ============================================================
+    // 10. CONTA CORRENTE
+    // ============================================================
+
+    await preencher(
+        'CONTACORRENTE',
+        DADOS.contaCorrente
+    );
+
+
+    // Conta dispara refreshpag('NUMTITULO').
+    // Observa rapidamente eventual aviso.
+    await observarModal(700);
+
+
+    // ============================================================
+    // 11. BANCO
+    // ============================================================
+
+    await preencher(
+        'CODBANCO',
+        DADOS.banco,
+        true
+    );
+
+
+    await observarModal(400);
+
+
+    // ============================================================
+    // 12. AGÊNCIA
+    // ============================================================
+
+    await preencher(
+        'CODAGENCIA',
+        DADOS.agencia,
+        true
+    );
+
+
+    await observarModal(400);
+
+
+    // ============================================================
+    // 13. TIPO DOCUMENTO
+    // ============================================================
+
+    await selecionarPorValor(
+        'Tipo Documento',
+        DADOS.tipoDocumento
+    );
+
+
+    // ============================================================
+    // 14. FORMA PAGAMENTO
+    // ============================================================
+
+    await selecionarPorValor(
+        'Forma Pagamento',
+        DADOS.formaPagamento
+    );
+
+
+    // ============================================================
+    // 15. NÚMERO DO TÍTULO
+    // ============================================================
+
+    await preencher(
+        'NUMTITULO',
+        DADOS.numeroTitulo
+    );
+
+
+    // ============================================================
+    // GARANTIA FINAL
+    // ============================================================
+
+    await fecharModalAgora();
+
+
+    // ============================================================
+    // FINAL
+    // ============================================================
+
+    console.log(
+        '=========================================='
+    );
+
+    console.log(
+        '🎉 PREENCHIMENTO FINALIZADO'
+    );
+
+    console.log(
+        `Duplicata: ${{duplicata}} | Sequência: ${{sequencia}}`
+    );
+
+    console.log(
+        `Local: ${{DADOS.local}}`
+    );
+
+    console.log(
+        `Status: ${{DADOS.status}}`
+    );
+
+    console.log(
+        `Cliente: ${{DADOS.cliente}}`
+    );
+
+    console.log(
+        `Representante: ${{DADOS.representante}}`
+    );
+
+    console.log(
+        `Emissão: ${{DADOS.dataEmissao}}`
+    );
+
+    console.log(
+        `Vencimento: ${{DADOS.vencimento}}`
+    );
+
+    console.log(
+        `Valor: ${{DADOS.valorEmissao}}`
+    );
+
+    console.log(
+        `Banco: ${{DADOS.banco}} | Agência: ${{DADOS.agencia}} | Conta: ${{DADOS.contaCorrente}}`
+    );
+
+    console.log(
+        `Número Título: ${{DADOS.numeroTitulo}}`
+    );
+
+    console.log(
+        '=========================================='
+    );
+
 }})();
-
-console.log(`Carregados ${{window.reimputacao.total}} documentos. Rode window.reimputacao.preencher() para começar.`);
 """
     return PlainTextResponse(content=script, media_type="application/javascript")
 

@@ -381,6 +381,16 @@ def test_recuperacao_de_titulos_apagados_via_ftp050(client):
         )
     assert r.status_code == 201, r.text
 
+    # FTP021A1: mesma cobertura, agora com Representante
+    with open(FIXTURES / "ftp021a1_amostra.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/ftp021a1",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("ftp021a1.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r.status_code == 201, r.text
+
     r = client.post("/conciliacoes", json={
         "bank_account_id": account_id, "competencia_year": 2026, "competencia_month": 1,
         "erp_import_file_id": erp_file_id, "bank_import_file_id": bank_file_id,
@@ -400,14 +410,17 @@ def test_recuperacao_de_titulos_apagados_via_ftp050(client):
     assert caso1["cliente_id"] == "1433"
     assert caso1["nota_fiscal"] == "34006"
     assert caso1["sequencia"] == "22"
+    assert caso1["representante_id"] == "7"
+    assert caso1["representante_nome"] == "ROSANIA MARIA DE CASTRO BASTOS"
 
-    # Caso real 2: 689222 -> NF 6892, aparece 2x no FTP050 (desempate por
-    # nome do pagador 'BAMBUA...' precisa escolher o cliente certo, não o
-    # 'OUTRO CLIENTE QUALQUER' que a amostra propositalmente inclui)
+    # Caso real 2: 689222 -> NF 6892, aparece 2x no FTP050 e no FTP021A1
+    # (desempate por nome do pagador 'BAMBUA...' precisa escolher o
+    # cliente/representante certo, não o 'OUTRO CLIENTE QUALQUER')
     caso2 = next(t for t in titulos if t["seu_numero"] == "689222")
     assert caso2["resolved"] is True
     assert caso2["local_id"] == 2
     assert caso2["cliente_id"] == "1642"
+    assert caso2["representante_id"] == "71"
 
     # Os demais títulos não têm NF na amostra pequena -> não resolvidos,
     # mas presentes na lista (nunca escondidos). NF 34006 tem 2 parcelas
@@ -424,13 +437,18 @@ def test_recuperacao_de_titulos_apagados_via_ftp050(client):
     assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
     assert len(r.content) > 1000
 
-    # Script de console é gerado e contém os dados resolvidos
-    r = client.get(f"/conciliacoes/{reconciliation_id}/recuperacao/script")
+    # Script de console é gerado por documento (um botão "Criar Console"
+    # por linha, não mais um arquivo combinado)
+    resolvido_34006 = next(t for t in resolvidos if t["nota_fiscal"] == "34006")
+    r = client.get(f"/conciliacoes/{reconciliation_id}/recuperacao/{resolvido_34006['match_id']}/script")
     assert r.status_code == 200
-    assert "window.reimputacao" in r.text
-    assert "34006" in r.text
-    assert "6892" in r.text
+    assert "DADOS" in r.text
+    assert "34006" in r.text or resolvido_34006["seu_numero"] in r.text
+    assert "MEAT HUNTER [0]" in r.text
+    assert '"cliente": "1433"' in r.text
     assert "98967-1" in r.text  # conta corrente da conciliação
+    assert "selecionarPorTexto" in r.text  # veio do template real, não reinventado
+    assert "selecionarPorValor" in r.text
 
 
 

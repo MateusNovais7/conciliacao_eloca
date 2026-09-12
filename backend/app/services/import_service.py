@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.importers.banks.itau_francesinha import import_itau_francesinha
 from app.importers.erp.crp032a1 import import_crp032a1
 from app.importers.erp.ffp045a2 import import_erp_ffp045a2
+from app.importers.erp.ftp021a1 import import_ftp021a1
 from app.importers.erp.ftp050 import import_ftp050
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction as BankTransactionRow
@@ -26,6 +27,7 @@ from app.models.documento_recebido import DocumentoRecebido as DocumentoRecebido
 from app.models.erp_transaction import ERPTransaction as ERPTransactionRow
 from app.models.import_file import ImportFile, ImportFileKind
 from app.models.nota_fiscal_emitida import NotaFiscalEmitida as NotaFiscalEmitidaRow
+from app.models.pedido_nota_fiscal import PedidoNotaFiscal as PedidoNotaFiscalRow
 
 
 class DuplicateImportError(Exception):
@@ -295,6 +297,63 @@ def import_ftp050_file(
             razao_social=n.razao_social,
             cnpj_cpf=n.cnpj_cpf,
             total=n.total,
+        ))
+
+    session.commit()
+    return import_file, False
+
+
+def import_ftp021a1_file(
+    session: Session,
+    bank_account_id: UUID,
+    file_path: str | Path,
+    competencia_year: int,
+    competencia_month: int,
+    imported_by: str,
+    storage_path: str,
+) -> tuple[ImportFile, bool]:
+    """FTP021A1 (Pedidos/Notas Fiscais) — complementa o FTP050 na
+    recuperação de documentos apagados com o campo Representante (ver
+    app/services/recovery_service.py). Não participa da conciliação
+    mensal normal."""
+    file_path = Path(file_path)
+    file_hash = _file_hash(file_path)
+    existing = _find_existing_import(session, bank_account_id, file_hash)
+    if existing:
+        return existing, True
+
+    pedidos = import_ftp021a1(file_path)
+
+    dates = [p.data_emissao for p in pedidos if p.data_emissao]
+    import_file = ImportFile(
+        bank_account_id=bank_account_id,
+        kind=ImportFileKind.FTP021A1.value,
+        original_filename=file_path.name,
+        file_hash=file_hash,
+        storage_path=storage_path,
+        competencia_year=competencia_year,
+        competencia_month=competencia_month,
+        period_start=min(dates) if dates else None,
+        period_end=max(dates) if dates else None,
+        row_count=len(pedidos),
+        imported_by=imported_by,
+    )
+    session.add(import_file)
+    session.flush()
+
+    for p in pedidos:
+        session.add(PedidoNotaFiscalRow(
+            import_file_id=import_file.id,
+            bank_account_id=bank_account_id,
+            local=p.local,
+            pedido=p.pedido,
+            nota_fiscal=p.nota_fiscal,
+            serie=p.serie,
+            data_emissao=p.data_emissao,
+            cliente_id=p.cliente_id,
+            razao_social=p.razao_social,
+            representante_id=p.representante_id,
+            representante_nome=p.representante_nome,
         ))
 
     session.commit()

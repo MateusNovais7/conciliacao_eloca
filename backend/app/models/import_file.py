@@ -16,6 +16,7 @@ class ImportFileKind(str, enum.Enum):
     BANK = "BANK"
     CRP032A1 = "CRP032A1"
     FTP050 = "FTP050"
+    FTP021A1 = "FTP021A1"
 
 
 class ImportFile(Base):

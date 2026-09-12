@@ -59,6 +59,9 @@ export type RecoveredTitle = {
   local_nome: string | null;
   cliente_id: string | null;
   razao_social: string | null;
+  data_emissao: string | null;
+  representante_id: string | null;
+  representante_nome: string | null;
   resolved: boolean;
 };
 
