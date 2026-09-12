@@ -7,14 +7,31 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.api.auth import require_api_key
 from app.database.deps import get_session
 from app.models.bank_account import BankAccount
+from app.models.import_file import ImportFile
 from app.schemas.reconciliation import ImportFileOut
 from app.services.import_service import DuplicateImportError, import_bank_file, import_erp_file
 
 router = APIRouter(prefix="/importacoes", tags=["importacoes"])
+
+
+@router.get("", response_model=list[ImportFileOut])
+def list_import_files(
+    bank_account_id: UUID | None = None,
+    session: Session = Depends(get_session),
+    _=Depends(require_api_key),
+):
+    """Lista os arquivos já importados — útil para retomar uma conciliação
+    sem reimportar um arquivo que já foi processado com sucesso (ver
+    DuplicateImportError, item 33 do escopo: idempotência por hash)."""
+    query = session.query(ImportFile).order_by(ImportFile.imported_at.desc())
+    if bank_account_id:
+        query = query.filter_by(bank_account_id=bank_account_id)
+    return query.all()
 
 
 def _storage_dir() -> Path:
