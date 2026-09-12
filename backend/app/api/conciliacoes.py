@@ -59,6 +59,46 @@ def _compute_reconciled_pct(session: Session, reconciliation_id: UUID) -> float:
     return round(100 * reconciled / total_in_scope, 2)
 
 
+@router.delete("/{reconciliation_id}", status_code=204)
+def delete_reconciliation(
+    reconciliation_id: UUID, performed_by: str,
+    session: Session = Depends(get_session), _=Depends(require_api_key),
+):
+    """Item 39/19 — exclusão é permitida, mas nunca silenciosa: gera log de
+    auditoria com o estado anterior, e é bloqueada para competências
+    FECHADA (reabra antes se realmente precisar apagar)."""
+    reconciliation = _get_reconciliation_or_404(session, reconciliation_id)
+    if reconciliation.status == ReconciliationLifecycleStatus.FECHADA:
+        raise HTTPException(
+            status_code=409,
+            detail="Esta competência está fechada. Reabra antes de excluir.",
+        )
+
+    match_ids = [
+        row.id for row in
+        session.query(ReconciliationMatchRow.id).filter_by(reconciliation_id=reconciliation.id).all()
+    ]
+    if match_ids:
+        session.query(ManualAdjustment).filter(
+            ManualAdjustment.reconciliation_match_id.in_(match_ids)
+        ).delete(synchronize_session=False)
+        session.query(ReconciliationMatchRow).filter(
+            ReconciliationMatchRow.id.in_(match_ids)
+        ).delete(synchronize_session=False)
+
+    session.add(AuditLog(
+        action=AuditAction.EXCLUSAO, entity_type="Reconciliation", entity_id=reconciliation.id,
+        performed_by=performed_by,
+        before={
+            "competencia_year": reconciliation.competencia_year,
+            "competencia_month": reconciliation.competencia_month,
+            "status": reconciliation.status.value,
+        },
+    ))
+    session.delete(reconciliation)
+    session.commit()
+
+
 @router.get("", response_model=list[ReconciliationHistoryItem])
 def list_reconciliations(
     bank_account_id: UUID,

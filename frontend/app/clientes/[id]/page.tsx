@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/api";
 import type { BankAccount, Client, ReconciliationHistoryItem } from "@/types/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { BackButton } from "@/components/BackButton";
+import { DeleteReconciliationButton } from "@/components/DeleteReconciliationButton";
 
 const MONTHS_ABBR = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez",
@@ -71,10 +72,10 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                   ) : (
                     <ul className="divide-y divide-stone-100">
                       {history.map((h) => (
-                        <li key={h.id}>
+                        <li key={h.id} className="group flex items-center">
                           <Link
                             href={`/conciliacoes/${h.id}`}
-                            className="flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-stone-50"
+                            className="flex flex-1 items-center justify-between px-5 py-3.5 transition-colors hover:bg-stone-50"
                           >
                             <span className="text-sm font-medium text-stone-800">
                               {MONTHS_ABBR[h.competencia_month - 1]}/{h.competencia_year}
@@ -84,6 +85,12 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                               <StatusBadge status={h.status} />
                             </div>
                           </Link>
+                          <div className="pr-3">
+                            <DeleteReconciliationButton
+                              reconciliationId={h.id}
+                              label={`${MONTHS_ABBR[h.competencia_month - 1]}/${h.competencia_year}`}
+                            />
+                          </div>
                         </li>
                       ))}
                     </ul>

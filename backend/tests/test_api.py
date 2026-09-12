@@ -219,3 +219,62 @@ def test_conciliacao_diaria(client):
     divergent_day = next(d for d in days if d["status"] == "DIVERGENTE")
     assert len(divergent_day["match_ids"]) > 0
 
+
+def test_excluir_conciliacao_duplicada_do_historico(client):
+    r = client.post("/clientes", json={"name": "Cliente Exclusão"})
+    client_id = r.json()["id"]
+    r = client.post("/contas", json={
+        "client_id": client_id, "bank": "Itaú", "agency": "6157", "account_number": "11111-1",
+    })
+    account_id = r.json()["id"]
+
+    with open(FIXTURES / "erp_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/erp",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("erp.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    erp_file_id = r.json()["id"]
+    with open(FIXTURES / "itau_francesinha_janeiro2026.xlsx", "rb") as f:
+        r = client.post(
+            "/importacoes/banco",
+            data={"bank_account_id": account_id, "competencia_year": 2026,
+                  "competencia_month": 1, "imported_by": "teste@empresa.com"},
+            files={"file": ("banco.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    bank_file_id = r.json()["id"]
+
+    # cria a mesma competência duas vezes (o cenário real relatado: usuário
+    # importou repetido e ficou duplicado no histórico)
+    ids = []
+    for _ in range(2):
+        r = client.post("/conciliacoes", json={
+            "bank_account_id": account_id, "competencia_year": 2026, "competencia_month": 1,
+            "erp_import_file_id": erp_file_id, "bank_import_file_id": bank_file_id,
+        })
+        ids.append(r.json()["id"])
+        client.post(f"/conciliacoes/{r.json()['id']}/executar")
+
+    r = client.get("/conciliacoes", params={"bank_account_id": account_id})
+    assert len(r.json()) == 2
+
+    # exclui a duplicata
+    r = client.delete(f"/conciliacoes/{ids[0]}", params={"performed_by": "teste@empresa.com"})
+    assert r.status_code == 204, r.text
+
+    r = client.get("/conciliacoes", params={"bank_account_id": account_id})
+    assert len(r.json()) == 1
+    assert r.json()[0]["id"] == ids[1]
+
+    # os arquivos importados continuam intactos (não é a exclusão que
+    # apaga o dado original — item 6 do escopo)
+    r = client.get("/importacoes", params={"bank_account_id": account_id})
+    assert len(r.json()) == 2
+
+    # competência fechada não pode ser excluída
+    client.post(f"/conciliacoes/{ids[1]}/fechar", params={"performed_by": "teste@empresa.com"})
+    r = client.delete(f"/conciliacoes/{ids[1]}", params={"performed_by": "teste@empresa.com"})
+    assert r.status_code == 409
+
+
